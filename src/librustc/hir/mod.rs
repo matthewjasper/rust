@@ -238,6 +238,7 @@ pub struct PathSegment {
     /// distinction.
     pub parameters: Option<P<PathParameters>>,
 
+    // FIXME: Correct this comment
     /// Whether to infer remaining type parameters, if any.
     /// This only applies to expression and pattern paths, and
     /// out of those only the segments with no type parameters

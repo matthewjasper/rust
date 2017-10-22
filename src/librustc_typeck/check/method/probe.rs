@@ -1192,10 +1192,7 @@ impl<'a, 'gcx, 'tcx> ProbeContext<'a, 'gcx, 'tcx> {
         // associated value (i.e., methods, constants) but not types.
         match self.mode {
             Mode::MethodCall => item.method_has_self_argument,
-            Mode::Path => match item.kind {
-                ty::AssociatedKind::Type => false,
-                ty::AssociatedKind::Method | ty::AssociatedKind::Const => true
-            },
+            Mode::Path => Namespace::from(item.kind) == Namespace::Value,
         }
         // FIXME -- check for types that deref to `Self`,
         // like `Rc<Self>` and so on.

@@ -96,6 +96,7 @@ use rustc::ty::subst::{Kind, Subst, Substs};
 use rustc::traits::{self, FulfillmentContext, ObligationCause, ObligationCauseCode};
 use rustc::ty::{ParamTy, LvaluePreference, NoPreference, PreferMutLvalue};
 use rustc::ty::{self, Ty, TyCtxt, Visibility};
+use rustc::ty::ToPredicate;
 use rustc::ty::adjustment::{Adjust, Adjustment, AutoBorrow};
 use rustc::ty::fold::{BottomUpFolder, TypeFoldable};
 use rustc::ty::maps::Providers;
@@ -1678,6 +1679,61 @@ impl<'a, 'gcx, 'tcx> AstConv<'gcx, 'tcx> for FnCtxt<'a, 'gcx, 'tcx> {
 
     fn record_ty(&self, hir_id: hir::HirId, ty: Ty<'tcx>, _span: Span) {
         self.write_ty(hir_id, ty)
+    }
+
+    fn param_env(&self) -> ty::ParamEnv<'tcx> {
+        self.param_env
+    }
+
+    fn consider_probe<'b>(&self,
+                      trait_ref: ty::TraitRef<'tcx>,
+                      span: Span,
+                      ref_id: ast::NodeId,
+                      _possibly_unsatisfied_predicates: &mut Vec<ty::TraitRef<'b>>)
+                      // FIXME: Enum
+                      -> bool {
+        // debug!("consider_probe: self_ty={:?} probe={:?}", self_ty, probe);
+
+
+        let infer = &self.infcx;
+        infer.probe(|_| {
+            let mut selcx = traits::SelectionContext::new(infer);
+            let cause = traits::ObligationCause::misc(span, ref_id);
+            let predicate = trait_ref.to_predicate();
+            let obligation =
+                traits::Obligation::new(
+                    cause.clone(),
+                    self.param_env(),
+                    predicate
+                );
+
+            selcx.evaluate_obligation(&obligation)
+            // if !selcx.evaluate_obligation(&obligation) {
+            //     if infer.probe(|_| {
+            //         let predicate =
+            //         trait_ref.to_poly_trait_ref().to_poly_trait_predicate();
+            //         let obligation = traits::Obligation::new(cause, self.param_env(), predicate);
+            //         traits::SelectionContext::new(infer)
+            //             .select(&obligation)
+            //             .is_err()
+            //     }) {
+            //             // This candidate's primary obligation doesn't even
+            //         // select - don't bother registering anything in
+            //         // `potentially_unsatisfied_predicates`.
+            //         result = false
+            //     } else {
+            //         // Some nested subobligation of this predicate
+            //         // failed.
+            //         //
+            //         // FIXME: try to find the exact nested subobligation
+            //         // and point at it rather than reporting the entire
+            //         // trait-ref?
+            //         let trait_ref = infer.resolve_type_vars_if_possible(&trait_ref);
+            //         possibly_unsatisfied_predicates.push(trait_ref);
+            //         result = false
+            //     }
+            // }
+        })
     }
 }
 

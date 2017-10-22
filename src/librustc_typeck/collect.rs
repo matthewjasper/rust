@@ -30,6 +30,8 @@ use constrained_type_params as ctp;
 use middle::lang_items::SizedTraitLangItem;
 use middle::const_val::ConstVal;
 use middle::resolve_lifetime as rl;
+// use rustc::infer;
+use rustc::traits;
 use rustc::traits::Reveal;
 use rustc::ty::subst::Substs;
 use rustc::ty::{ToPredicate, ReprOptions};
@@ -224,6 +226,65 @@ impl<'a, 'tcx> AstConv<'tcx, 'tcx> for ItemCtxt<'a, 'tcx> {
 
     fn record_ty(&self, _hir_id: hir::HirId, _ty: Ty<'tcx>, _span: Span) {
         // no place to record types from signatures?
+    }
+
+    fn param_env(&self) -> ty::ParamEnv<'tcx> {
+        self.tcx().param_env(self.item_def_id)
+    }
+
+    fn consider_probe<'b>(&self,
+                      trait_ref: ty::TraitRef<'tcx>,
+                      span: Span,
+                      ref_id: ast::NodeId,
+                      _possibly_unsatisfied_predicates: &mut Vec<ty::TraitRef<'b>>)
+                      // FIXME: Enum
+                      -> bool {
+        // debug!("consider_probe: self_ty={:?} probe={:?}", self_ty, probe);
+
+        let mut result = true;
+
+        self.tcx.infer_ctxt().enter(|infer| {
+            infer.probe(|_| {
+                let mut selcx = traits::SelectionContext::new(&infer);
+                let cause = traits::ObligationCause::misc(span, ref_id);
+                let predicate = trait_ref.to_predicate();
+                let obligation =
+                    traits::Obligation::new(
+                        cause.clone(),
+                        self.param_env(),
+                        predicate
+                    );
+
+                result = selcx.evaluate_obligation(&obligation);
+                // if !selcx.evaluate_obligation(&obligation) {
+                //     if infer.probe(|_| {
+                //         let predicate =
+                //         trait_ref.to_poly_trait_ref().to_poly_trait_predicate();
+                //         let obligation = traits::Obligation::new(cause, self.param_env(), predicate);
+                //         traits::SelectionContext::new(&infer)
+                //             .select(&obligation)
+                //             .is_err()
+                //     }) {
+                //             // This candidate's primary obligation doesn't even
+                //         // select - don't bother registering anything in
+                //         // `potentially_unsatisfied_predicates`.
+                //         result = false
+                //     } else {
+                //         // Some nested subobligation of this predicate
+                //         // failed.
+                //         //
+                //         // FIXME: try to find the exact nested subobligation
+                //         // and point at it rather than reporting the entire
+                //         // trait-ref?
+                //         let trait_ref = infer.resolve_type_vars_if_possible(&trait_ref);
+                //         possibly_unsatisfied_predicates.push(trait_ref);
+                //         result = false
+                //     }
+                // }
+            })
+        });
+
+        result
     }
 }
 

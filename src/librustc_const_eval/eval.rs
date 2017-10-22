@@ -15,6 +15,7 @@ use rustc::middle::const_val::{ByteArray, ConstVal, ConstEvalErr, EvalResult, Er
 
 use rustc::hir::map as hir_map;
 use rustc::hir::map::blocks::FnLikeNode;
+use rustc::infer;
 use rustc::traits;
 use rustc::hir::def::{Def, CtorKind};
 use rustc::hir::def_id::DefId;
@@ -497,7 +498,8 @@ fn resolve_trait_associated_const<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
     debug!("resolve_trait_associated_const: trait_ref={:?}",
            trait_ref);
 
-    tcx.infer_ctxt().enter(|infcx| {
+    let mut infer_ctxt: infer::InferCtxtBuilder = tcx.infer_ctxt();
+    infer_ctxt.enter(|infcx| {
         let mut selcx = traits::SelectionContext::new(&infcx);
         let obligation = traits::Obligation::new(traits::ObligationCause::dummy(),
                                                  param_env,

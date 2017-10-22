@@ -21,7 +21,8 @@ use middle::resolve_lifetime as rl;
 use namespace::Namespace;
 use rustc::ty::subst::{Kind, Subst, Substs};
 use rustc::traits;
-use rustc::ty::{self, Ty, TyCtxt, ToPredicate, TypeFoldable};
+// use rustc::infer;
+use rustc::ty::{self, Ty, TyCtxt, ToPredicate, TypeFoldable/* , ToPolyTraitRef */};
 use rustc::ty::wf::object_region_bounds;
 use rustc_back::slice;
 use require_c_abi_if_variadic;
@@ -31,6 +32,7 @@ use util::nodemap::FxHashSet;
 use std::iter;
 use syntax::{abi, ast};
 use syntax::feature_gate::{GateIssue, emit_feature_err};
+use syntax::util::lev_distance::lev_distance;
 use syntax_pos::Span;
 
 pub trait AstConv<'gcx, 'tcx> {
@@ -79,6 +81,24 @@ pub trait AstConv<'gcx, 'tcx> {
     fn set_tainted_by_errors(&self);
 
     fn record_ty(&self, hir_id: hir::HirId, ty: Ty<'tcx>, span: Span);
+
+    // FIXME: Comment?
+    fn param_env(&self) -> ty::ParamEnv<'tcx>;
+
+    // // FIXME: Comment?
+    // fn with_infer_ctxt(
+    //     &self,
+    //     f: F,
+    // ) where F: for<'b, 'c> FnMut(&infer::InferCtxt<'b, 'gcx, 'c>)
+    //     and Self: Sized;
+
+    fn consider_probe<'a>(&self,
+                      trait_ref: ty::TraitRef<'tcx>,
+                      span: Span,
+                      ref_id: ast::NodeId,
+                      possibly_unsatisfied_predicates: &mut Vec<ty::TraitRef<'a>>)
+                      // FIXME: Enum
+                      -> bool;
 }
 
 struct ConvertedBinding<'tcx> {
@@ -766,8 +786,6 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
     // For a path A::B::C::D, ty and ty_path_def are the type and def for A::B::C
     // and item_segment is the path segment for D. We return a type and a def for
     // the whole path.
-    // Will fail except for T::A and Self::A; i.e., if ty/ty_path_def are not a type
-    // parameter or Self.
     pub fn associated_path_def_to_ty(&self,
                                      ref_id: ast::NodeId,
                                      span: Span,
@@ -785,7 +803,7 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
 
         // Find the type of the associated item, and the trait where the associated
         // item is declared.
-        let bound = match (&ty.sty, ty_path_def) {
+        let bound: ty::PolyTraitRef = match (&ty.sty, ty_path_def) {
             (_, Def::SelfTy(Some(_), Some(impl_def_id))) => {
                 // `Self` in an impl of a trait - we have a concrete self type and a
                 // trait reference.
@@ -815,14 +833,15 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
                 }
             }
             _ => {
-                // Don't print TyErr to the user.
-                if !ty.references_error() {
-                    self.report_ambiguous_associated_type(span,
-                                                          &ty.to_string(),
-                                                          "Trait",
-                                                          &assoc_name.as_str());
-                }
-                return (tcx.types.err, Def::Err);
+                self.path_to_ty(
+                    ref_id,
+                    span,
+                    assoc_name,
+                    ty,
+                    item_segment
+                )
+
+                // return (tcx.types.err, Def::Err);
             }
         };
 
@@ -847,6 +866,160 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
         (ty, def)
     }
 
+    fn path_to_ty(&self,
+                   ref_id: ast::NodeId,
+                   span: Span,
+                   assoc_name: ast::Name,
+                   self_ty: Ty<'tcx>,
+                   item_segment: &hir::PathSegment)
+                   -> ty::PolyTraitRef<'tcx>
+    {
+        let tcx = self.tcx();
+
+        let mut duplicates = FxHashSet();
+
+        let mut candidates = Vec::new();
+
+        let ref_hir_id = tcx.hir.node_to_hir_id(ref_id);
+        let opt_applicable_traits = self.tcx().in_scope_traits(ref_hir_id);
+        if let Some(applicable_traits) = opt_applicable_traits {
+            for trait_candidate in applicable_traits.iter() {
+                let trait_did = trait_candidate.def_id;
+                if duplicates.insert(trait_did) {
+                    // let import_id = trait_candidate.import_id;
+                    candidates.extend(
+                        self.trait_assoc_type(
+                            trait_did, Some(assoc_name), false
+                        )
+                    );
+
+                }
+            }
+        }
+
+
+        let candidates: Vec<_> = candidates.into_iter().filter_map(|candidate| {
+            let item_def_id = candidate.def_id;
+            let trait_def_id = tcx.parent_def_id(item_def_id).unwrap();
+
+            // FIXME: See if this is necessary
+            // Stops `<U as Blah<T = V>> AFAIK
+            self.prohibit_type_params(slice::ref_slice(item_segment));
+
+            let (substs, assoc_bindings) = self.create_substs_for_ast_path(
+                span,
+                trait_def_id,
+                &hir::PathParameters::none(),
+                true,
+                Some(self_ty)
+            );
+
+            assoc_bindings.first().map(|b| self.prohibit_projection(b.span));
+            let trait_ref = ty::TraitRef::new(trait_def_id, substs);
+
+            debug!("path_to_ty: trait_ref={:?}", trait_ref);
+
+            let mut possibly_unsatisfied_predicates = Vec::new();
+
+            if self.consider_probe(
+                trait_ref,
+                span,
+                ref_id,
+                &mut possibly_unsatisfied_predicates
+            ) {
+                Some(ty::Binder(trait_ref))
+            } else {
+                None
+            }
+        }).collect();
+
+        if candidates.len() > 1 {
+            bug!("\n*************\nFIXME - AMBIGUOUS TYPES\n*************\n");
+        }
+        if candidates.len() == 0 {
+            bug!("\n*************\nFIXME - NO TYPES\n*************\n")
+        }
+
+        // FIXME: Check if these are needed, then add.
+        // if let Some(import_id) = pick.import_id {
+        //     let import_def_id = self.tcx().hir.local_def_id(import_id);
+        //     debug!("used_trait_import: {:?}", import_def_id);
+        //     self.tables.borrow_mut().used_trait_imports.insert(import_def_id);
+        // }
+
+        // FIXME: Stability check.
+        // self.tcx.check_stability(item_def_id, ref_id, span);
+
+
+
+        // debug!("path_to_ty: self_type={:?}", self_ty);
+
+        // let trait_ref = self.ast_path_to_mono_trait_ref(span,
+        //                                                 trait_def_id,
+        //                                                 self_ty,
+        //                                                 trait_segment);
+
+        candidates[0]
+    }
+
+    // fn _assemble_extension_candidates_for_trait(&mut self,
+    //                                            import_id: Option<ast::NodeId>,
+    //                                            trait_def_id: DefId)
+    //                                            -> Option<(ty::AssociatedItem, Option<ast::NodeId>,
+    //                                            ty::TraitRef)> {
+    //     debug!("assemble_extension_candidates_for_trait(trait_def_id={:?})",
+    //            trait_def_id);
+    //     let trait_substs = self.fresh_item_substs(trait_def_id);
+    //     let trait_ref = ty::TraitRef::new(trait_def_id, trait_substs);
+
+
+    //     if let Some(item) = self.trait_assoc_type(trait_def_id, ).first() {
+    //         Some((item, import_id, trait_ref))
+    //     } else {
+    //         None
+    //     }
+    // }
+
+
+    /// Find the method with the appropriate name (or return type, as the case may be). If
+    /// `allow_similar_names` is set, find methods with close-matching names.
+    fn trait_assoc_type(&self, def_id: DefId, assoc_type_name: Option<ast::Name>, allow_similar_names: bool)
+                        -> Vec<ty::AssociatedItem> {
+        if let Some(name) = assoc_type_name {
+            if allow_similar_names {
+                let max_dist = ::std::cmp::max(name.as_str().len(), 3) / 3;
+                self.tcx().associated_items(def_id)
+                    .filter(|x| {
+                        let dist = lev_distance(&*name.as_str(), &x.name.as_str());
+                        Namespace::from(x.kind) == Namespace::Type && dist > 0
+                        && dist <= max_dist
+                    })
+                    .collect()
+            } else {
+                self.associated_item(def_id, name, Namespace::Type)
+                    .map_or(Vec::new(), |x| vec![x])
+            }
+        } else {
+            self.tcx().associated_items(def_id).collect()
+        }
+    }
+
+    /// Find item with name `item_name` defined in impl/trait `def_id`
+    /// and return it, or `None`, if no such item was defined there.
+    fn associated_item(&self, def_id: DefId, item_name: ast::Name, ns: Namespace)
+                           -> Option<ty::AssociatedItem> {
+        self.tcx().associated_items(def_id)
+                .find(|item| Namespace::from(item.kind) == ns &&
+                             self.tcx().hygienic_eq(item_name, item.name, def_id))
+    }
+
+    // fn fresh_item_substs(&self, def_id: DefId) -> &'tcx Substs<'tcx> {
+    //     Substs::for_item(self.tcx(),
+    //                      def_id,
+    //                      |_, _| self.tcx().types.re_erased,
+    //                      |_, _| self.ty_infer(self.tcx().def_span(def_id)))
+    // }
+
     fn qpath_to_ty(&self,
                    span: Span,
                    opt_self_ty: Option<Ty<'tcx>>,
@@ -856,7 +1029,7 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
                    -> Ty<'tcx>
     {
         let tcx = self.tcx();
-        let trait_def_id = tcx.parent_def_id(item_def_id).unwrap();
+        let trait_def_id: DefId = tcx.parent_def_id(item_def_id).unwrap();
 
         self.prohibit_type_params(slice::ref_slice(item_segment));
 
@@ -873,7 +1046,7 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
 
         debug!("qpath_to_ty: self_type={:?}", self_ty);
 
-        let trait_ref = self.ast_path_to_mono_trait_ref(span,
+        let trait_ref: ty::TraitRef = self.ast_path_to_mono_trait_ref(span,
                                                         trait_def_id,
                                                         self_ty,
                                                         trait_segment);

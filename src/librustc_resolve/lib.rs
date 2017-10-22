@@ -2646,10 +2646,11 @@ impl<'a> Resolver<'a> {
                 }
             }
             Some(resolution) if source.defer_to_typeck() => {
+                // FIXME: This comment
                 // Not fully resolved associated item `T::A::B` or `<T as Tr>::A::B`
                 // or `<T>::A::B`. If `B` should be resolved in value namespace then
                 // it needs to be added to the trait map.
-                if ns == ValueNS {
+                if ns != MacroNS {
                     let item_name = path.last().unwrap().node;
                     let traits = self.get_traits_containing_item(item_name, ns);
                     self.trait_map.insert(id, traits);
@@ -3319,7 +3320,7 @@ impl<'a> Resolver<'a> {
             ExprKind::Field(_, name) => {
                 // FIXME(#6890): Even though you can't treat a method like a
                 // field, we need to add any trait methods we find that match
-                // the field name so that we can do some nice error reporting
+                // the field name so that we can do some nice error jhreporting
                 // later on in typeck.
                 let traits = self.get_traits_containing_item(name.node, ValueNS);
                 self.trait_map.insert(expr.id, traits);
