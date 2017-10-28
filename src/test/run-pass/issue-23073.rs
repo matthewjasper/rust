@@ -1,4 +1,4 @@
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -8,15 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-enum S {
-    A,
+#![feature(associated_type_defaults)]
+
+trait Foo { type T; }
+trait Bar {
+    type Foo: Foo;
+    type FooT = <<Self as Bar>::Foo>::T;
 }
 
-fn bug(l: S) {
-    match l {
-        S::B{ } => { },
-        //~^ ERROR associated type `B` not found for `S`
-    }
-}
-
-fn main () {}
+fn main() {}

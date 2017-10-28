@@ -39,10 +39,10 @@ fn g<T: Tr<A = S>>() {
 }
 
 fn main() {
-    let s = S::A {}; //~ ERROR ambiguous associated type
-    let z = S::A::<u8> {}; //~ ERROR ambiguous associated type
+    let s = S::A {}; // OK
+    let z = S::A::<u8> {};
     //~^ ERROR type parameters are not allowed on this type
     match S {
-        S::A {} => {} //~ ERROR ambiguous associated type
+        S::A {} => {} // OK
     }
 }

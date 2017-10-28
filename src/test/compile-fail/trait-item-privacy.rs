@@ -123,10 +123,10 @@ fn check_assoc_ty<T: assoc_ty::C>() {
     use assoc_ty::C;
 
     // Associated types
-    // A, B, C are resolved as trait items, their traits need to be in scope, not implemented yet
-    let _: S::A; //~ ERROR ambiguous associated type
-    let _: S::B; //~ ERROR ambiguous associated type
-    let _: S::C; //~ ERROR ambiguous associated type
+    // A, B, C are resolved as trait items, their traits need to be in scope
+    let _: S::A; //~ ERROR associated type `A` not found for `S`
+    let _: S::B; //~ ERROR associated type `B` not found for `S`
+    let _: S::C; // OK
     // A, B, C are resolved as inherent items, their traits don't need to be in scope
     let _: T::A; //~ ERROR associated type `A` is private
     let _: T::B; // OK

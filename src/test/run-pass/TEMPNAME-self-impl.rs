@@ -8,8 +8,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// Test that unsupported uses of `Self` in impls don't crash
-
 struct Bar;
 
 trait Foo {
@@ -31,13 +29,7 @@ impl SuperFoo for Bar {
 impl Bar {
     fn f() {
         let _: <Self>::Baz = true;
-        //~^ ERROR ambiguous associated type
-        //~| NOTE ambiguous associated type
-        //~| NOTE specify the type using the syntax `<Bar as Trait>::Baz`
         let _: Self::Baz = true;
-        //~^ ERROR ambiguous associated type
-        //~| NOTE ambiguous associated type
-        //~| NOTE specify the type using the syntax `<Bar as Trait>::Baz`
     }
 }
 

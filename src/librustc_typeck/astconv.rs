@@ -92,19 +92,21 @@ pub trait AstConv<'gcx, 'tcx> {
     // ) where F: for<'b, 'c> FnMut(&infer::InferCtxt<'b, 'gcx, 'c>)
     //     and Self: Sized;
 
-    fn consider_probe<'a>(&self,
-                      trait_ref: ty::TraitRef<'tcx>,
-                      span: Span,
-                      ref_id: ast::NodeId,
-                      possibly_unsatisfied_predicates: &mut Vec<ty::TraitRef<'a>>)
-                      // FIXME: Enum
-                      -> bool;
+    fn consider_probe<'a>(
+        &self,
+        candidates: Vec<ty::AssociatedItem>,
+        self_ty: Ty<'tcx>,
+        span: Span,
+        ref_id: ast::NodeId,
+        item_segment: &hir::PathSegment,
+        // possibly_unsatisfied_predicates: &mut Vec<ty::TraitRef<'a>>
+    ) -> Result<ty::PolyTraitRef<'tcx>, ErrorReported>;
 }
 
-struct ConvertedBinding<'tcx> {
+pub struct ConvertedBinding<'tcx> {
     item_name: ast::Name,
     ty: Ty<'tcx>,
-    span: Span,
+    pub span: Span,
 }
 
 /// Dummy type used for the `Self` of a `TraitRef` created for converting
@@ -199,7 +201,7 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
     /// set of substitutions. This may involve applying defaulted type parameters.
     ///
     /// Note that the type listing given here is *exactly* what the user provided.
-    fn create_substs_for_ast_path(&self,
+    pub fn create_substs_for_ast_path(&self,
         span: Span,
         def_id: DefId,
         parameters: &hir::PathParameters,
@@ -728,7 +730,7 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
 
     // Checks that bounds contains exactly one element and reports appropriate
     // errors otherwise.
-    fn one_bound_for_assoc_type<I>(&self,
+    pub fn one_bound_for_assoc_type<I>(&self,
                                 mut bounds: I,
                                 ty_param_name: &str,
                                 assoc_name: ast::Name,
@@ -791,7 +793,8 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
                                      span: Span,
                                      ty: Ty<'tcx>,
                                      ty_path_def: Def,
-                                     item_segment: &hir::PathSegment)
+                                     item_segment: &hir::PathSegment
+                                     )
                                      -> (Ty<'tcx>, Def)
     {
         let tcx = self.tcx();
@@ -833,15 +836,16 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
                 }
             }
             _ => {
-                self.path_to_ty(
+                match self.path_to_ty(
                     ref_id,
                     span,
                     assoc_name,
                     ty,
-                    item_segment
-                )
-
-                // return (tcx.types.err, Def::Err);
+                    item_segment,
+                ) {
+                    Ok(bound) => bound,
+                    Err(ErrorReported) => return (tcx.types.err, Def::Err),
+                }
             }
         };
 
@@ -867,13 +871,24 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
     }
 
     fn path_to_ty(&self,
-                   ref_id: ast::NodeId,
-                   span: Span,
-                   assoc_name: ast::Name,
-                   self_ty: Ty<'tcx>,
-                   item_segment: &hir::PathSegment)
-                   -> ty::PolyTraitRef<'tcx>
+                  ref_id: ast::NodeId,
+                  span: Span,
+                  assoc_name: ast::Name,
+                  self_ty: Ty<'tcx>,
+                  item_segment: &hir::PathSegment
+                //    item_segment: &hir::PathSegment
+                   )
+                   -> Result<ty::PolyTraitRef<'tcx>, ErrorReported>
     {
+        // FIXME: put this in the right place
+        if self_ty.references_error() {
+            self.tcx().sess.delay_span_bug(
+                span,
+                "Tried to resolve associated type on a type error."
+            );
+            return Err(ErrorReported);
+        }
+
         let tcx = self.tcx();
 
         let mut duplicates = FxHashSet();
@@ -897,94 +912,23 @@ impl<'o, 'gcx: 'tcx, 'tcx> AstConv<'gcx, 'tcx>+'o {
             }
         }
 
-
-        let candidates: Vec<_> = candidates.into_iter().filter_map(|candidate| {
-            let item_def_id = candidate.def_id;
-            let trait_def_id = tcx.parent_def_id(item_def_id).unwrap();
-
-            // FIXME: See if this is necessary
-            // Stops `<U as Blah<T = V>> AFAIK
-            self.prohibit_type_params(slice::ref_slice(item_segment));
-
-            let (substs, assoc_bindings) = self.create_substs_for_ast_path(
-                span,
-                trait_def_id,
-                &hir::PathParameters::none(),
-                true,
-                Some(self_ty)
-            );
-
-            assoc_bindings.first().map(|b| self.prohibit_projection(b.span));
-            let trait_ref = ty::TraitRef::new(trait_def_id, substs);
-
-            debug!("path_to_ty: trait_ref={:?}", trait_ref);
-
-            let mut possibly_unsatisfied_predicates = Vec::new();
-
-            if self.consider_probe(
-                trait_ref,
+        self.consider_probe(
+                candidates,
+                self_ty,
                 span,
                 ref_id,
-                &mut possibly_unsatisfied_predicates
-            ) {
-                Some(ty::Binder(trait_ref))
-            } else {
-                None
-            }
-        }).collect();
-
-        if candidates.len() > 1 {
-            bug!("\n*************\nFIXME - AMBIGUOUS TYPES\n*************\n");
-        }
-        if candidates.len() == 0 {
-            bug!("\n*************\nFIXME - NO TYPES\n*************\n")
-        }
-
-        // FIXME: Check if these are needed, then add.
-        // if let Some(import_id) = pick.import_id {
-        //     let import_def_id = self.tcx().hir.local_def_id(import_id);
-        //     debug!("used_trait_import: {:?}", import_def_id);
-        //     self.tables.borrow_mut().used_trait_imports.insert(import_def_id);
-        // }
-
-        // FIXME: Stability check.
-        // self.tcx.check_stability(item_def_id, ref_id, span);
-
-
-
-        // debug!("path_to_ty: self_type={:?}", self_ty);
-
-        // let trait_ref = self.ast_path_to_mono_trait_ref(span,
-        //                                                 trait_def_id,
-        //                                                 self_ty,
-        //                                                 trait_segment);
-
-        candidates[0]
+                item_segment,
+        )
     }
-
-    // fn _assemble_extension_candidates_for_trait(&mut self,
-    //                                            import_id: Option<ast::NodeId>,
-    //                                            trait_def_id: DefId)
-    //                                            -> Option<(ty::AssociatedItem, Option<ast::NodeId>,
-    //                                            ty::TraitRef)> {
-    //     debug!("assemble_extension_candidates_for_trait(trait_def_id={:?})",
-    //            trait_def_id);
-    //     let trait_substs = self.fresh_item_substs(trait_def_id);
-    //     let trait_ref = ty::TraitRef::new(trait_def_id, trait_substs);
-
-
-    //     if let Some(item) = self.trait_assoc_type(trait_def_id, ).first() {
-    //         Some((item, import_id, trait_ref))
-    //     } else {
-    //         None
-    //     }
-    // }
-
 
     /// Find the method with the appropriate name (or return type, as the case may be). If
     /// `allow_similar_names` is set, find methods with close-matching names.
-    fn trait_assoc_type(&self, def_id: DefId, assoc_type_name: Option<ast::Name>, allow_similar_names: bool)
-                        -> Vec<ty::AssociatedItem> {
+    fn trait_assoc_type(
+        &self,
+        def_id: DefId,
+        assoc_type_name: Option<ast::Name>,
+        allow_similar_names: bool
+    ) -> Vec<ty::AssociatedItem> {
         if let Some(name) = assoc_type_name {
             if allow_similar_names {
                 let max_dist = ::std::cmp::max(name.as_str().len(), 3) / 3;

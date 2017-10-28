@@ -23,22 +23,22 @@ trait B<T> {
     type C;
 }
 // FIXME? This shouldn't error?
-impl B<i32> for A {
-    type C = i32;
-}
-
-// trait E {
-//     type C;
-// }
-// impl E for A {
+// impl B<i32> for A {
 //     type C = i32;
 // }
 
+trait E {
+    type C;
+}
+impl E for A {
+    type C = i32;
+}
 
 
-// fn id(x: i32) -> A::C {
-//     x
-// }
+
+fn id(x: i32) -> A::C {
+    x
+}
 
 fn local() -> i32 {
     let x: A::C = 4i32;
@@ -46,6 +46,6 @@ fn local() -> i32 {
 }
 
 fn main() {
-    println!("{}", local());
+    println!("{} {}", id(3), local());
     // println!("{}", id(8));
 }

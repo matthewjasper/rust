@@ -602,7 +602,7 @@ impl<'a, 'gcx, 'tcx> InheritedBuilder<'a, 'gcx, 'tcx> {
 }
 
 impl<'a, 'gcx, 'tcx> Inherited<'a, 'gcx, 'tcx> {
-    fn new(infcx: InferCtxt<'a, 'gcx, 'tcx>, def_id: DefId) -> Self {
+    pub fn new(infcx: InferCtxt<'a, 'gcx, 'tcx>, def_id: DefId) -> Self {
         let tcx = infcx.tcx;
         let item_id = tcx.hir.as_local_node_id(def_id);
         let body_id = item_id.and_then(|id| tcx.hir.maybe_body_owned_by(id));
@@ -1685,55 +1685,63 @@ impl<'a, 'gcx, 'tcx> AstConv<'gcx, 'tcx> for FnCtxt<'a, 'gcx, 'tcx> {
         self.param_env
     }
 
-    fn consider_probe<'b>(&self,
-                      trait_ref: ty::TraitRef<'tcx>,
-                      span: Span,
-                      ref_id: ast::NodeId,
-                      _possibly_unsatisfied_predicates: &mut Vec<ty::TraitRef<'b>>)
-                      // FIXME: Enum
-                      -> bool {
+    fn consider_probe(
+        &self,
+        candidates: Vec<ty::AssociatedItem>,
+        self_ty: Ty<'tcx>,
+        span: Span,
+        ref_id: ast::NodeId,
+        item_segment: &hir::PathSegment,
+        //   _possibly_unsatisfied_predicates: &mut Vec<ty::TraitRef>
+    ) -> Result<ty::PolyTraitRef<'tcx>, ErrorReported> {
         // debug!("consider_probe: self_ty={:?} probe={:?}", self_ty, probe);
 
-
         let infer = &self.infcx;
-        infer.probe(|_| {
-            let mut selcx = traits::SelectionContext::new(infer);
-            let cause = traits::ObligationCause::misc(span, ref_id);
-            let predicate = trait_ref.to_predicate();
-            let obligation =
-                traits::Obligation::new(
-                    cause.clone(),
-                    self.param_env(),
-                    predicate
-                );
 
-            selcx.evaluate_obligation(&obligation)
-            // if !selcx.evaluate_obligation(&obligation) {
-            //     if infer.probe(|_| {
-            //         let predicate =
-            //         trait_ref.to_poly_trait_ref().to_poly_trait_predicate();
-            //         let obligation = traits::Obligation::new(cause, self.param_env(), predicate);
-            //         traits::SelectionContext::new(infer)
-            //             .select(&obligation)
-            //             .is_err()
-            //     }) {
-            //             // This candidate's primary obligation doesn't even
-            //         // select - don't bother registering anything in
-            //         // `potentially_unsatisfied_predicates`.
-            //         result = false
-            //     } else {
-            //         // Some nested subobligation of this predicate
-            //         // failed.
-            //         //
-            //         // FIXME: try to find the exact nested subobligation
-            //         // and point at it rather than reporting the entire
-            //         // trait-ref?
-            //         let trait_ref = infer.resolve_type_vars_if_possible(&trait_ref);
-            //         possibly_unsatisfied_predicates.push(trait_ref);
-            //         result = false
-            //     }
-            // }
-        })
+        let candidates = candidates.into_iter().filter_map(|candidate| {
+            let item_def_id = candidate.def_id;
+            let trait_def_id = self.tcx.parent_def_id(item_def_id).unwrap();
+
+            let (substs, assoc_bindings) = AstConv::create_substs_for_ast_path(
+                self,
+                span,
+                trait_def_id,
+                &hir::PathParameters::none(),
+                true,
+                Some(self_ty)
+            );
+
+            // FIXME: See if this is necessary
+            // Stops `<U as Blah<T = V>> AFAIK
+            assoc_bindings.first().map(|b| AstConv::prohibit_projection(self, b.span));
+            let trait_ref = ty::TraitRef::new(trait_def_id, substs);
+
+            debug!("path_to_ty: trait_ref={:?}", trait_ref);
+
+            infer.probe(|_| {
+                let mut selcx = traits::SelectionContext::new(infer);
+                let cause = traits::ObligationCause::misc(span, ref_id);
+                let predicate = trait_ref.to_predicate();
+                let obligation =
+                    traits::Obligation::new(
+                        cause.clone(),
+                        self.param_env(),
+                        predicate
+                    );
+
+                if selcx.evaluate_obligation(&obligation) {
+                    Some(ty::Binder(trait_ref))
+                } else {
+                    None
+                }
+            })
+        });
+
+        AstConv::one_bound_for_assoc_type(self,
+                                          candidates,
+                                          &self_ty.to_string(),
+                                          item_segment.name,
+                                          span)
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -8,12 +8,23 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(associated_type_defaults)]
+use std::ops::{Add, Mul, Neg};
 
-trait Foo { type T; }
-trait Bar {
-    type Foo: Foo;
-    type FooT = <<Self as Bar>::Foo>::T; //~ ERROR ambiguous associated type
+fn sum_of_squares<A, B>(a: A, b: B)
+where
+    A: Mul + Copy,
+    B: Mul + Copy,
+    A::Output: Add<B::Output>
+{
+    let _: A::Output::Output = a * a + b * b;
+}
+
+fn minus_square<A>(a: A) -> A::Output::Output
+where
+    A: Mul + Copy,
+    A::Output: Neg,
+{
+    -(a * a)
 }
 
 fn main() {}

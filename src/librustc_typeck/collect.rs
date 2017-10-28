@@ -31,7 +31,8 @@ use middle::lang_items::SizedTraitLangItem;
 use middle::const_val::ConstVal;
 use middle::resolve_lifetime as rl;
 // use rustc::infer;
-use rustc::traits;
+use check::{FnCtxt, Inherited};
+// use rustc::traits;
 use rustc::traits::Reveal;
 use rustc::ty::subst::Substs;
 use rustc::ty::{ToPredicate, ReprOptions};
@@ -39,6 +40,7 @@ use rustc::ty::{self, AdtKind, ToPolyTraitRef, Ty, TyCtxt};
 use rustc::ty::maps::Providers;
 use rustc::ty::util::IntTypeExt;
 use util::nodemap::FxHashMap;
+use util::common::ErrorReported;
 
 use rustc_const_math::ConstInt;
 
@@ -232,59 +234,44 @@ impl<'a, 'tcx> AstConv<'tcx, 'tcx> for ItemCtxt<'a, 'tcx> {
         self.tcx().param_env(self.item_def_id)
     }
 
-    fn consider_probe<'b>(&self,
-                      trait_ref: ty::TraitRef<'tcx>,
-                      span: Span,
-                      ref_id: ast::NodeId,
-                      _possibly_unsatisfied_predicates: &mut Vec<ty::TraitRef<'b>>)
-                      // FIXME: Enum
-                      -> bool {
+    fn consider_probe(
+        &self,
+        candidates: Vec<ty::AssociatedItem>,
+        self_ty: Ty<'tcx>,
+        span: Span,
+        ref_id: ast::NodeId,
+        item_segment: &hir::PathSegment,
+        // _possibly_unsatisfied_predicates: &mut Vec<ty::TraitRef>
+    ) -> Result<ty::PolyTraitRef<'tcx>, ErrorReported> {
         // debug!("consider_probe: self_ty={:?} probe={:?}", self_ty, probe);
 
-        let mut result = true;
-
         self.tcx.infer_ctxt().enter(|infer| {
-            infer.probe(|_| {
-                let mut selcx = traits::SelectionContext::new(&infer);
-                let cause = traits::ObligationCause::misc(span, ref_id);
-                let predicate = trait_ref.to_predicate();
-                let obligation =
-                    traits::Obligation::new(
-                        cause.clone(),
-                        self.param_env(),
-                        predicate
-                    );
+            let param_env = self.tcx.param_env(self.item_def_id);
+            let inh = Inherited::new(infer, self.item_def_id);
 
-                result = selcx.evaluate_obligation(&obligation);
-                // if !selcx.evaluate_obligation(&obligation) {
-                //     if infer.probe(|_| {
-                //         let predicate =
-                //         trait_ref.to_poly_trait_ref().to_poly_trait_predicate();
-                //         let obligation = traits::Obligation::new(cause, self.param_env(), predicate);
-                //         traits::SelectionContext::new(&infer)
-                //             .select(&obligation)
-                //             .is_err()
-                //     }) {
-                //             // This candidate's primary obligation doesn't even
-                //         // select - don't bother registering anything in
-                //         // `potentially_unsatisfied_predicates`.
-                //         result = false
-                //     } else {
-                //         // Some nested subobligation of this predicate
-                //         // failed.
-                //         //
-                //         // FIXME: try to find the exact nested subobligation
-                //         // and point at it rather than reporting the entire
-                //         // trait-ref?
-                //         let trait_ref = infer.resolve_type_vars_if_possible(&trait_ref);
-                //         possibly_unsatisfied_predicates.push(trait_ref);
-                //         result = false
-                //     }
-                // }
+            let fcx = FnCtxt::new(&inh, param_env, ref_id);
+
+            fcx.consider_probe(candidates, self_ty, span, ref_id, item_segment)
+                .map(|poly_trait_ref| {
+                // Recreate the trait ref in the item's type context.
+
+                let trait_def_id = poly_trait_ref.0.def_id;
+
+                let (substs, assoc_bindings) = AstConv::create_substs_for_ast_path(
+                    self,
+                    span,
+                    trait_def_id,
+                    &hir::PathParameters::none(),
+                    true,
+                    Some(self_ty)
+                );
+                // FIXME: See if this is necessary
+                // Stops `<U as Blah<T = V>> AFAIK
+                assoc_bindings.first().map(|b| AstConv::prohibit_projection(self, b.span));
+                let trait_ref = ty::TraitRef::new(trait_def_id, substs);
+                ty::Binder(trait_ref)
             })
-        });
-
-        result
+        })
     }
 }
 

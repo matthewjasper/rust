@@ -43,7 +43,7 @@ fn main() {
     <u8 as Tr>::N::NN; //~ ERROR cannot find associated type `N` in trait `Tr`
     <u8 as E>::N::NN; //~ ERROR cannot find associated type `N` in enum `E`
     <u8 as A>::N::NN; //~ ERROR cannot find associated type `N` in `A`
-    let _: <u8 as Tr>::Y::NN; //~ ERROR ambiguous associated type
+    let _: <u8 as Tr>::Y::NN; //~ ERROR associated type `NN` not found for `<u8 as Tr>::Y`
     let _: <u8 as E>::Y::NN; //~ ERROR expected associated type, found variant `E::Y`
     <u8 as Tr>::Y::NN; //~ ERROR no associated item named `NN` found for type `<u8 as Tr>::Y`
     <u8 as E>::Y::NN; //~ ERROR expected associated type, found variant `E::Y`
