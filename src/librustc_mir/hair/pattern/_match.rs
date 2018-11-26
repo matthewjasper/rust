@@ -1315,7 +1315,7 @@ fn pat_constructors<'tcx>(cx: &mut MatchCheckCtxt<'_, 'tcx>,
 /// This computes the arity of a constructor. The arity of a constructor
 /// is how many subpattern patterns of that constructor should be expanded to.
 ///
-/// For instance, a tuple pattern (_, 42, Some([])) has the arity of 3.
+/// For instance, a tuple pattern `(_, 42, Some([]))` has the arity of 3.
 /// A struct pattern's arity is the number of fields it contains, etc.
 fn constructor_arity(_cx: &MatchCheckCtxt, ctor: &Constructor, ty: Ty) -> u64 {
     debug!("constructor_arity({:#?}, {:?})", ctor, ty);
