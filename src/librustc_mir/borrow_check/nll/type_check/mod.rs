@@ -381,45 +381,43 @@ impl<'a, 'b, 'gcx, 'tcx> TypeVerifier<'a, 'b, 'gcx, 'tcx> {
             "sanitize_constant(constant={:?}, location={:?})",
             constant, location
         );
+        let tcx = self.tcx();
 
-        let literal = match constant.literal {
-            ty::LazyConst::Evaluated(lit) => lit,
-            ty::LazyConst::Unevaluated(..) => return,
+        let literal_ty = match *constant.literal {
+            ty::LazyConst::Evaluated(lit) => {
+                // Function items and tuple constructors are lowered as
+                // `Evaluated` constants, so we have to extract their
+                // predicates from the type. Other constants lowered as
+                // `Evaluated` don't have any predicates.
+                if let ty::FnDef(def_id, substs) = lit.ty.sty {
+                    let type_checker = &mut self.cx;
+
+                    let instantiated_predicates = tcx.predicates_of(def_id).instantiate(tcx, substs);
+                    type_checker.normalize_and_prove_instantiated_predicates(
+                        instantiated_predicates,
+                        location.to_locations(),
+                    );
+                }
+                lit.ty
+            }
+            ty::LazyConst::Unevaluated(def_id, substs) => {
+                // Constant items  (associated) are lowered as `Unevaluated`,
+                // so we can get their predicates from the item.
+                let instantiated_predicates = tcx.predicates_of(def_id).instantiate(tcx, substs);
+                self.cx.normalize_and_prove_instantiated_predicates(
+                    instantiated_predicates,
+                    location.to_locations(),
+                );
+
+                let item_ty = tcx.type_of(def_id);
+                self.cx.normalize(item_ty.subst(tcx, substs), location.to_locations())
+            },
         };
 
-        // FIXME(#46702) -- We need some way to get the predicates
-        // associated with the "pre-evaluated" form of the
-        // constant. For example, consider that the constant
-        // may have associated constant projections (`<Foo as
-        // Trait<'a, 'b>>::SOME_CONST`) that impose
-        // constraints on `'a` and `'b`. These constraints
-        // would be lost if we just look at the normalized
-        // value.
-        if let ty::FnDef(def_id, substs) = literal.ty.sty {
-            let tcx = self.tcx();
-            let type_checker = &mut self.cx;
-
-            // FIXME -- For now, use the substitutions from
-            // `value.ty` rather than `value.val`. The
-            // renumberer will rewrite them to independent
-            // sets of regions; in principle, we ought to
-            // derive the type of the `value.val` from "first
-            // principles" and equate with value.ty, but as we
-            // are transitioning to the miri-based system, we
-            // don't have a handy function for that, so for
-            // now we just ignore `value.val` regions.
-
-            let instantiated_predicates = tcx.predicates_of(def_id).instantiate(tcx, substs);
-            type_checker.normalize_and_prove_instantiated_predicates(
-                instantiated_predicates,
-                location.to_locations(),
-            );
-        }
-
-        debug!("sanitize_constant: expected_ty={:?}", literal.ty);
+        debug!("sanitize_constant: expected_ty={:?}", literal_ty);
 
         if let Err(terr) = self.cx.eq_types(
-            literal.ty,
+            literal_ty,
             constant.ty,
             location.to_locations(),
             ConstraintCategory::Boring,
@@ -429,7 +427,7 @@ impl<'a, 'b, 'gcx, 'tcx> TypeVerifier<'a, 'b, 'gcx, 'tcx> {
                 constant,
                 "constant {:?} should have type {:?} but has {:?} ({:?})",
                 constant,
-                literal.ty,
+                literal_ty,
                 constant.ty,
                 terr,
             );
