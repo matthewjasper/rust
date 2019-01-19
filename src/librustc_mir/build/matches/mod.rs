@@ -1051,7 +1051,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
 
         // Insert a Shallow borrow of any places that is switched on.
         fake_borrows.as_mut().map(|fb| {
-            fb.entry(match_pair.place.clone()).or_insert(BorrowKind::Shallow)
+            fb.entry(match_pair.place.clone()).or_insert(BorrowKind::Guard)
         });
 
         // perform the test, branching to one of N blocks. For each of
@@ -1628,7 +1628,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
                         // Insert a shallow borrow after a deref. For other
                         // projections the borrow of prefix_cursor will
                         // conflict with any mutation of base.
-                        all_fake_borrows.push((base.clone(), BorrowKind::Shallow));
+                    all_fake_borrows.push((base.clone(), BorrowKind::Guard));
                     }
                     prefix_cursor = base;
                 }

@@ -196,7 +196,7 @@ fn place_components_conflict<'gcx, 'tcx>(
 
                 match (elem, &base_ty.sty, access) {
                     (_, _, Shallow(Some(ArtificialField::ArrayLength)))
-                    | (_, _, Shallow(Some(ArtificialField::ShallowBorrow))) => {
+                    | (_, _, Shallow(Some(ArtificialField::GuardBorrow))) => {
                         // The array length is like  additional fields on the
                         // type; it does not overlap any existing data there.
                         // Furthermore, if cannot actually be a prefix of any
@@ -262,7 +262,7 @@ fn place_components_conflict<'gcx, 'tcx>(
             // If the second example, where we did, then we still know
             // that the borrow can access a *part* of our place that
             // our access cares about, so we still have a conflict.
-            if borrow_kind == BorrowKind::Shallow && access_components.next().is_some() {
+            if borrow_kind == BorrowKind::Guard && access_components.next().is_some() {
                 debug!("borrow_conflicts_with_place: shallow borrow");
                 return false;
             } else {

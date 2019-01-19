@@ -595,8 +595,8 @@ macro_rules! make_mir_visitor {
                             BorrowKind::Shared => PlaceContext::NonMutatingUse(
                                 NonMutatingUseContext::SharedBorrow(*r)
                             ),
-                            BorrowKind::Shallow => PlaceContext::NonMutatingUse(
-                                NonMutatingUseContext::ShallowBorrow(*r)
+                            BorrowKind::Guard => PlaceContext::NonMutatingUse(
+                                NonMutatingUseContext::GuardBorrow(*r)
                             ),
                             BorrowKind::Unique => PlaceContext::NonMutatingUse(
                                 NonMutatingUseContext::UniqueBorrow(*r)
@@ -991,7 +991,7 @@ pub enum NonMutatingUseContext<'tcx> {
     /// Shared borrow.
     SharedBorrow(Region<'tcx>),
     /// Shallow borrow.
-    ShallowBorrow(Region<'tcx>),
+    GuardBorrow(Region<'tcx>),
     /// Unique borrow.
     UniqueBorrow(Region<'tcx>),
     /// Used as base for another place, e.g., `x` in `x.y`. Will not mutate the place.
@@ -1058,7 +1058,7 @@ impl<'tcx> PlaceContext<'tcx> {
     pub fn is_borrow(&self) -> bool {
         match *self {
             PlaceContext::NonMutatingUse(NonMutatingUseContext::SharedBorrow(..)) |
-            PlaceContext::NonMutatingUse(NonMutatingUseContext::ShallowBorrow(..)) |
+            PlaceContext::NonMutatingUse(NonMutatingUseContext::GuardBorrow(..)) |
             PlaceContext::NonMutatingUse(NonMutatingUseContext::UniqueBorrow(..)) |
             PlaceContext::MutatingUse(MutatingUseContext::Borrow(..)) => true,
             _ => false,

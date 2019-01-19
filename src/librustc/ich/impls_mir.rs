@@ -29,7 +29,7 @@ impl_stable_hash_for!(struct mir::UnsafetyCheckResult { violations, unsafe_block
 
 impl_stable_hash_for!(enum mir::BorrowKind {
     Shared,
-    Shallow,
+    Guard,
     Unique,
     Mut { allow_two_phase_borrow },
 });
@@ -196,7 +196,12 @@ impl_stable_hash_for!(impl<'gcx> for enum mir::StatementKind<'gcx> [ mir::Statem
 });
 
 impl_stable_hash_for!(enum mir::RetagKind { FnEntry, TwoPhase, Raw, Default });
-impl_stable_hash_for!(enum mir::FakeReadCause { ForMatchGuard, ForMatchedPlace, ForLet });
+impl_stable_hash_for!(enum mir::FakeReadCause {
+    ForMatchGuard,
+    ForMatchedPlace,
+    ForFakeBorrowPlace,
+    ForLet
+});
 
 impl<'a, 'gcx> HashStable<StableHashingContext<'a>> for mir::Place<'gcx> {
     fn hash_stable<W: StableHasherResult>(&self,

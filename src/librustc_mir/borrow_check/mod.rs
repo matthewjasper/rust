@@ -773,7 +773,7 @@ use self::AccessDepth::{Deep, Shallow};
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum ArtificialField {
     ArrayLength,
-    ShallowBorrow,
+    GuardBorrow,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -998,11 +998,11 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
                 }
 
                 (Read(_), BorrowKind::Shared) | (Reservation(..), BorrowKind::Shared)
-                | (Read(_), BorrowKind::Shallow) | (Reservation(..), BorrowKind::Shallow) => {
+                | (Read(_), BorrowKind::Guard) | (Reservation(..), BorrowKind::Guard) => {
                     Control::Continue
                 }
 
-                (Write(WriteKind::Move), BorrowKind::Shallow) => {
+                (Write(WriteKind::Move), BorrowKind::Guard) => {
                     // Handled by initialization checks.
                     Control::Continue
                 }
@@ -1135,8 +1135,8 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
         match *rvalue {
             Rvalue::Ref(_ /*rgn*/, bk, ref place) => {
                 let access_kind = match bk {
-                    BorrowKind::Shallow => {
-                        (Shallow(Some(ArtificialField::ShallowBorrow)), Read(ReadKind::Borrow(bk)))
+                    BorrowKind::Guard => {
+                        (Shallow(Some(ArtificialField::GuardBorrow)), Read(ReadKind::Borrow(bk)))
                     },
                     BorrowKind::Shared => (Deep, Read(ReadKind::Borrow(bk))),
                     BorrowKind::Unique | BorrowKind::Mut { .. } => {
@@ -1157,7 +1157,7 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
                     flow_state,
                 );
 
-                let action = if bk == BorrowKind::Shallow {
+                let action = if bk == BorrowKind::Guard {
                     InitializationRequiringAction::MatchOn
                 } else {
                     InitializationRequiringAction::Borrow
@@ -1411,7 +1411,7 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
 
             // only mutable borrows should be 2-phase
             assert!(match borrow.kind {
-                BorrowKind::Shared | BorrowKind::Shallow => false,
+                BorrowKind::Shared | BorrowKind::Guard => false,
                 BorrowKind::Unique | BorrowKind::Mut { .. } => true,
             });
 
@@ -1822,7 +1822,7 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
                 let is_local_mutation_allowed = match borrow_kind {
                     BorrowKind::Unique => LocalMutationIsAllowed::Yes,
                     BorrowKind::Mut { .. } => is_local_mutation_allowed,
-                    BorrowKind::Shared | BorrowKind::Shallow => unreachable!(),
+                    BorrowKind::Shared | BorrowKind::Guard => unreachable!(),
                 };
                 match self.is_mutable(place, is_local_mutation_allowed) {
                     Ok(root_place) => {
@@ -1852,10 +1852,10 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
             | Write(wk @ WriteKind::Move)
             | Reservation(wk @ WriteKind::StorageDeadOrDrop)
             | Reservation(wk @ WriteKind::MutableBorrow(BorrowKind::Shared))
-            | Reservation(wk @ WriteKind::MutableBorrow(BorrowKind::Shallow))
+            | Reservation(wk @ WriteKind::MutableBorrow(BorrowKind::Guard))
             | Write(wk @ WriteKind::StorageDeadOrDrop)
             | Write(wk @ WriteKind::MutableBorrow(BorrowKind::Shared))
-            | Write(wk @ WriteKind::MutableBorrow(BorrowKind::Shallow)) => {
+            | Write(wk @ WriteKind::MutableBorrow(BorrowKind::Guard)) => {
                 if let (Err(_place_err), true) = (
                     self.is_mutable(place, is_local_mutation_allowed),
                     self.errors_buffer.is_empty()
@@ -1900,7 +1900,7 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
             Read(ReadKind::Borrow(BorrowKind::Unique))
             | Read(ReadKind::Borrow(BorrowKind::Mut { .. }))
             | Read(ReadKind::Borrow(BorrowKind::Shared))
-            | Read(ReadKind::Borrow(BorrowKind::Shallow))
+            | Read(ReadKind::Borrow(BorrowKind::Guard))
             | Read(ReadKind::Copy) => {
                 // Access authorized
                 return false;

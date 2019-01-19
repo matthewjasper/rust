@@ -324,8 +324,8 @@ impl<'cg, 'cx, 'tcx, 'gcx> InvalidationGenerator<'cx, 'tcx, 'gcx> {
         match *rvalue {
             Rvalue::Ref(_ /*rgn*/, bk, ref place) => {
                 let access_kind = match bk {
-                    BorrowKind::Shallow => {
-                        (Shallow(Some(ArtificialField::ShallowBorrow)), Read(ReadKind::Borrow(bk)))
+                    BorrowKind::Guard => {
+                        (Shallow(Some(ArtificialField::GuardBorrow)), Read(ReadKind::Borrow(bk)))
                     },
                     BorrowKind::Shared => (Deep, Read(ReadKind::Borrow(bk))),
                     BorrowKind::Unique | BorrowKind::Mut { .. } => {
@@ -437,8 +437,8 @@ impl<'cg, 'cx, 'tcx, 'gcx> InvalidationGenerator<'cx, 'tcx, 'gcx> {
                         // have already taken the reservation
                     }
 
-                    (Read(_), BorrowKind::Shallow) | (Reservation(..), BorrowKind::Shallow)
-                    | (Read(_), BorrowKind::Shared) | (Reservation(..), BorrowKind::Shared) => {
+                    (Read(_), BorrowKind::Shared) | (Reservation(..), BorrowKind::Shared)
+                    | (Read(_), BorrowKind::Guard) | (Reservation(..), BorrowKind::Guard) => {
                         // Reads/reservations don't invalidate shared or shallow borrows
                     }
 
@@ -494,7 +494,7 @@ impl<'cg, 'cx, 'tcx, 'gcx> InvalidationGenerator<'cx, 'tcx, 'gcx> {
 
             // only mutable borrows should be 2-phase
             assert!(match borrow.kind {
-                BorrowKind::Shared | BorrowKind::Shallow => false,
+                BorrowKind::Shared | BorrowKind::Guard => false,
                 BorrowKind::Unique | BorrowKind::Mut { .. } => true,
             });
 

@@ -422,8 +422,8 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
                 )
             }
 
-            (BorrowKind::Mut { .. }, _, _, BorrowKind::Shallow, _, _)
-            | (BorrowKind::Unique, _, _, BorrowKind::Shallow, _, _) => {
+            (BorrowKind::Mut { .. }, _, _, BorrowKind::Guard, _, _)
+            | (BorrowKind::Unique, _, _, BorrowKind::Guard, _, _) => {
                 let mut err = tcx.cannot_mutate_in_match_guard(
                     span,
                     issued_span,
@@ -489,16 +489,16 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
                 )
             }
 
-            (BorrowKind::Shallow, _, _, BorrowKind::Unique, _, _)
-            | (BorrowKind::Shallow, _, _, BorrowKind::Mut { .. }, _, _) => {
+            (BorrowKind::Guard, _, _, BorrowKind::Unique, _, _)
+            | (BorrowKind::Guard, _, _, BorrowKind::Mut { .. }, _, _) => {
                 // Shallow borrows are uses from the user's point of view.
                 self.report_use_while_mutably_borrowed(context, (place, span), issued_borrow);
                 return;
             }
             (BorrowKind::Shared, _, _, BorrowKind::Shared, _, _)
-            | (BorrowKind::Shared, _, _, BorrowKind::Shallow, _, _)
-            | (BorrowKind::Shallow, _, _, BorrowKind::Shared, _, _)
-            | (BorrowKind::Shallow, _, _, BorrowKind::Shallow, _, _) => unreachable!(),
+            | (BorrowKind::Shared, _, _, BorrowKind::Guard, _, _)
+            | (BorrowKind::Guard, _, _, BorrowKind::Shared, _, _)
+            | (BorrowKind::Guard, _, _, BorrowKind::Guard, _, _) => unreachable!(),
         };
 
         if issued_spans == borrow_spans {
@@ -1330,7 +1330,7 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
         let loan_span = loan_spans.args_or_use();
 
         let tcx = self.infcx.tcx;
-        let mut err = if loan.kind == BorrowKind::Shallow {
+        let mut err = if loan.kind == BorrowKind::Guard {
             tcx.cannot_mutate_in_match_guard(
                 span,
                 loan_span,
