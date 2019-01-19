@@ -1,7 +1,7 @@
 //! See docs in build/expr/mod.rs
 
 use build::expr::category::Category;
-use build::ForGuard::{OutsideGuard, RefWithinGuard};
+use build::ForGuard::{Value, RefWithinGuard};
 use build::{BlockAnd, BlockAndExtension, Builder};
 use hair::*;
 use rustc::mir::interpret::EvalErrorKind::BoundsCheck;
@@ -120,7 +120,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
                     let index = this.var_local_id(id, RefWithinGuard);
                     Place::Local(index).deref()
                 } else {
-                    let index = this.var_local_id(id, OutsideGuard);
+                    let index = this.var_local_id(id, Value);
                     Place::Local(index)
                 };
                 block.and(place)

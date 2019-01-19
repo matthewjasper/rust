@@ -12,7 +12,7 @@ use borrow_check::path_utils::*;
 use dataflow::move_paths::indexes::BorrowIndex;
 use rustc::ty::TyCtxt;
 use rustc::mir::visit::Visitor;
-use rustc::mir::{BasicBlock, Location, Mir, Place, Rvalue};
+use rustc::mir::{BasicBlock, Location, Mir, Place, Rvalue, FakeReadCause};
 use rustc::mir::{Statement, StatementKind};
 use rustc::mir::{Terminator, TerminatorKind};
 use rustc::mir::{Operand, BorrowKind};
@@ -78,13 +78,18 @@ impl<'cx, 'tcx, 'gcx> Visitor<'tcx> for InvalidationGenerator<'cx, 'tcx, 'gcx> {
                     JustWrite
                 );
             }
-            StatementKind::FakeRead(_, ref place) => {
+            StatementKind::FakeRead(FakeReadCause::ForFakeBorrowPlace, ref place) => {
                 self.access_place(
                     ContextKind::FakeRead.new(location),
                     place,
-                    (Deep, Read(ReadKind::Borrow(BorrowKind::Shared))),
+                    (Shallow(None), Read(ReadKind::Copy)),
                     LocalMutationIsAllowed::No,
                 );
+            }
+            StatementKind::FakeRead(FakeReadCause::ForMatchedPlace, _)
+            | StatementKind::FakeRead(FakeReadCause::ForLet, _)
+            | StatementKind::FakeRead(FakeReadCause::ForMatchGuard, _) => {
+                // Only relavent for initialized/liveness/safety checks.
             }
             StatementKind::SetDiscriminant {
                 ref place,
@@ -438,7 +443,9 @@ impl<'cg, 'cx, 'tcx, 'gcx> InvalidationGenerator<'cx, 'tcx, 'gcx> {
                     }
 
                     (Read(_), BorrowKind::Shared) | (Reservation(..), BorrowKind::Shared)
-                    | (Read(_), BorrowKind::Guard) | (Reservation(..), BorrowKind::Guard) => {
+                    | (Read(_), BorrowKind::Guard) | (Reservation(..), BorrowKind::Guard)
+                    | (Read(ReadKind::Borrow(BorrowKind::Guard)), BorrowKind::Unique)
+                    | (Read(ReadKind::Borrow(BorrowKind::Guard)), BorrowKind::Mut { .. }) => {
                         // Reads/reservations don't invalidate shared or shallow borrows
                     }
 

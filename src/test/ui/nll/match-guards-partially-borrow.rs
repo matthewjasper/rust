@@ -11,20 +11,34 @@
 
 fn ok_mutation_in_guard(mut q: i32) {
     match q {
-        // OK, mutation doesn't change which patterns g matches
-        _ if { q = 1; false } => (),
+        // OK, mutation doesn't change which patterns q matches
         _ => (),
+        _ if { q = 1; false } => (),
+        x => (),
     }
 }
 
 fn ok_indirect_mutation_in_guard(mut p: &bool) {
     match *p {
-        // OK, mutation doesn't change which patterns s matches
+        // OK, mutation doesn't change which patterns p matches
+        _ => (),
         _ if {
             p = &true;
             false
         } => (),
+        x => (),
+    }
+}
+
+fn ok_indirect_mutation_in_guard2(mut b: &bool) {
+    match b {
+        // OK, mutation doesn't change which patterns b matches
         _ => (),
+        _ if {
+            b = &true;
+            false
+        } => (),
+        &x => (),
     }
 }
 
@@ -75,19 +89,7 @@ fn bad_mutation_in_guard(mut t: bool) {
     }
 }
 
-fn bad_mutation_in_guard2(mut u: bool) {
-    match u {
-        // Guard changes the value bound in the last pattern.
-        _ => (),
-        _ if {
-            u = true; //~ ERROR
-            false
-        } => (),
-        x => (),
-    }
-}
-
-pub fn bad_mutation_in_guard3(mut x: Option<Option<&i32>>) {
+pub fn bad_mutation_in_guard2(mut x: Option<Option<&i32>>) {
     // Check that nested patterns are checked.
     match x {
         None => (),
@@ -100,19 +102,6 @@ pub fn bad_mutation_in_guard3(mut x: Option<Option<&i32>>) {
             false
         } => (),
         Some(Some(r)) => println!("{}", r),
-    }
-}
-
-
-fn bad_mutation_in_guard4(mut w: (&mut bool,)) {
-    match w {
-        // Guard changes the value bound in the last pattern.
-        _ => (),
-        _ if {
-            *w.0 = true; //~ ERROR
-            false
-        } => (),
-        x => (),
     }
 }
 
@@ -147,17 +136,6 @@ fn bad_indirect_mutation_in_guard3(mut a: &bool) {
             false
         } => (),
         false => (),
-    }
-}
-
-fn bad_indirect_mutation_in_guard4(mut b: &bool) {
-    match b {
-        &_ => (),
-        &_ if {
-            b = &true; //~ ERROR
-            false
-        } => (),
-        &b => (),
     }
 }
 

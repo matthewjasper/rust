@@ -1,5 +1,5 @@
 use build::{BlockAnd, BlockAndExtension, BlockFrame, Builder};
-use build::ForGuard::OutsideGuard;
+use build::ForGuard::Value;
 use build::matches::ArmHasGuard;
 use hair::*;
 use rustc::mir::*;
@@ -146,8 +146,8 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
                             &pattern,
                             UserTypeProjections::none(),
                             &mut |this, _, _, _, node, span, _, _| {
-                                this.storage_live_binding(block, node, span, OutsideGuard);
-                                this.schedule_drop_for_binding(node, span, OutsideGuard);
+                                this.storage_live_binding(block, node, span, Value);
+                                this.schedule_drop_for_binding(node, span, Value);
                             })
                     }
 

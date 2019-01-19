@@ -46,7 +46,8 @@ fn enum_example(mut e: E) {
         E::V(ref mut x, _) => x,
         E::W => panic!(),
     };
-    match e { // Don't know that E uses a tag for its discriminant
+    // Don't know that E uses a tag for its discriminant
+    match e { //~ ERROR
         _ if false => (),
         E::V(_, r) => (), //~ ERROR
         E::W => (),
@@ -59,7 +60,8 @@ fn indirect_enum_example(mut f: &mut E) {
         E::V(ref mut x, _) => x,
         E::W => panic!(),
     };
-    match f { // Don't know that E uses a tag for its discriminant
+    // Don't know that E uses a tag for its discriminant
+    match f { //~ ERROR
         _ if false => (),
         E::V(_, r) => (), //~ ERROR
         E::W => (),

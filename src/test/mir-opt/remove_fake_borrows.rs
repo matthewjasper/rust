@@ -21,45 +21,53 @@ fn main() {
 // bb0: {
 //     FakeRead(ForMatchedPlace, _1);
 //     _2 = discriminant(_1);
-//     _3 = &shallow _1;
-//     _4 = &shallow ((_1 as Some).0: &'<empty> &'<empty> i32);
-//     _5 = &shallow (*((_1 as Some).0: &'<empty> &'<empty> i32));
-//     _6 = &shallow (*(*((_1 as Some).0: &'<empty> &'<empty> i32)));
-//     switchInt(move _2) -> [1isize: bb6, otherwise: bb4];
+//     _3 = &guard _1;
+//      FakeRead(ForFakeBorrowPlace, _1);
+//     _4 = &guard ((_1 as Some).0: &'<empty> &'<empty> i32);
+//      FakeRead(ForFakeBorrowPlace, ((_1 as Some).0: &'<empty> &'<empty> i32));
+//     _5 = &guard (*((_1 as Some).0: &'<empty> &'<empty> i32));
+//      FakeRead(ForFakeBorrowPlace, (*((_1 as Some).0: &'<empty> &'<empty> i32)));
+//     _6 = &guard (*(*((_1 as Some).0: &'<empty> &'<empty> i32)));
+//      FakeRead(ForFakeBorrowPlace, (*(*((_1 as Some).0: &'<empty> &'<empty> i32))));
+//     switchInt(move _2) -> [1isize: bb6, otherwise: bb3];
 // }
 // bb1: {
-//     _0 = const 0i32;
+//     _0 = const 1i32;
 //     goto -> bb9;
 // }
 // bb2: {
-//     _0 = const 1i32;
-//     goto -> bb9;
+//     FakeRead(ForMatchGuard, _3);
+//     FakeRead(ForMatchGuard, _4);
+//     FakeRead(ForMatchGuard, _5);
+//     FakeRead(ForMatchGuard, _6);
+//     goto -> bb5;
 // }
 // bb3: {
 //     FakeRead(ForMatchGuard, _3);
 //     FakeRead(ForMatchGuard, _4);
 //     FakeRead(ForMatchGuard, _5);
 //     FakeRead(ForMatchGuard, _6);
-//     goto -> bb7;
-// }
-// bb4: {
-//     FakeRead(ForMatchGuard, _3);
-//     FakeRead(ForMatchGuard, _4);
-//     FakeRead(ForMatchGuard, _5);
-//     FakeRead(ForMatchGuard, _6);
-//     goto -> bb2;
-// }
-// bb5: {
-//     unreachable;
-// }
-// bb6: {
-//     switchInt((*(*((_1 as Some).0: &'<empty> &'<empty> i32)))) -> [0i32: bb3, otherwise: bb4];
-// }
-// bb7: {
 //     goto -> bb1;
 // }
+// bb4: {
+//     unreachable;
+// }
+// bb5: {
+//     _3 = &guard _1;
+//     _4 = &guard ((_1 as Some).0: &'<empty> &'<empty> i32);
+//     _5 = &guard (*((_1 as Some).0: &'<empty> &'<empty> i32));
+//     _6 = &guard (*(*((_1 as Some).0: &'<empty> &'<empty> i32)));
+//     goto -> bb8;
+// }
+// bb6: {
+//     switchInt((*(*((_1 as Some).0: &'<empty> &'<empty> i32)))) -> [0i32: bb2, otherwise: bb3];
+// }
+// bb7: {
+//     goto -> bb3;
+// }
 // bb8: {
-//     goto -> bb4;
+//     _0 = const 0i32;
+//     goto -> bb9;
 // }
 // bb9: {
 //     return;
@@ -77,41 +85,49 @@ fn main() {
 //     nop;
 //     nop;
 //     nop;
-//     switchInt(move _2) -> [1isize: bb6, otherwise: bb4];
+//     nop;
+//     nop;
+//     nop;
+//     nop;
+//     switchInt(move _2) -> [1isize: bb6, otherwise: bb3];
 // }
 // bb1: {
-//     _0 = const 0i32;
+//     _0 = const 1i32;
 //     goto -> bb9;
 // }
 // bb2: {
-//     _0 = const 1i32;
-//     goto -> bb9;
+//     nop;
+//     nop;
+//     nop;
+//     nop;
+//     goto -> bb5;
 // }
 // bb3: {
 //     nop;
 //     nop;
 //     nop;
 //     nop;
-//     goto -> bb7;
-// }
-// bb4: {
-//     nop;
-//     nop;
-//     nop;
-//     nop;
-//     goto -> bb2;
-// }
-// bb5: {
-//     unreachable;
-// }
-// bb6: {
-//     switchInt((*(*((_1 as Some).0: &'<empty> &'<empty> i32)))) -> [0i32: bb3, otherwise: bb4];
-// }
-// bb7: {
 //     goto -> bb1;
 // }
+// bb4: {
+//     unreachable;
+// }
+// bb5: {
+//     nop;
+//     nop;
+//     nop;
+//     nop;
+//     goto -> bb8;
+// }
+// bb6: {
+//     switchInt((*(*((_1 as Some).0: &'<empty> &'<empty> i32)))) -> [0i32: bb2, otherwise: bb3];
+// }
+// bb7: {
+//     goto -> bb3;
+// }
 // bb8: {
-//     goto -> bb4;
+//     _0 = const 0i32;
+//     goto -> bb9;
 // }
 // bb9: {
 //     return;

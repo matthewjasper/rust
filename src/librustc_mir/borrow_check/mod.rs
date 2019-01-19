@@ -9,8 +9,8 @@ use rustc::lint::builtin::UNUSED_MUT;
 use rustc::middle::borrowck::SignalledError;
 use rustc::mir::{AggregateKind, BasicBlock, BorrowCheckResult, BorrowKind};
 use rustc::mir::{ClearCrossCrate, Local, Location, Mir, Mutability, Operand, Place};
-use rustc::mir::{Field, Projection, ProjectionElem, Rvalue, Statement, StatementKind};
-use rustc::mir::{Terminator, TerminatorKind};
+use rustc::mir::{FakeReadCause, Field, Projection, ProjectionElem, Rvalue};
+use rustc::mir::{Statement, StatementKind, Terminator, TerminatorKind};
 use rustc::ty::query::Providers;
 use rustc::ty::{self, TyCtxt};
 
@@ -511,7 +511,7 @@ impl<'cx, 'gcx, 'tcx> DataflowResultsConsumer<'cx, 'tcx> for MirBorrowckCtxt<'cx
                     flow_state,
                 );
             }
-            StatementKind::FakeRead(_, ref place) => {
+            StatementKind::FakeRead(FakeReadCause::ForMatchedPlace, ref place) => {
                 // Read for match doesn't access any memory and is used to
                 // assert that a place is safe and live. So we don't have to
                 // do any checks here.
@@ -528,6 +528,19 @@ impl<'cx, 'gcx, 'tcx> DataflowResultsConsumer<'cx, 'tcx> for MirBorrowckCtxt<'cx
                     (place, span),
                     flow_state,
                 );
+            }
+            StatementKind::FakeRead(FakeReadCause::ForFakeBorrowPlace, ref place) => {
+                self.access_place(
+                    ContextKind::FakeRead.new(location),
+                    (place, span),
+                    (Shallow(None), Read(ReadKind::Copy)),
+                    LocalMutationIsAllowed::No,
+                    flow_state,
+                );
+            }
+            StatementKind::FakeRead(FakeReadCause::ForLet, _)
+            | StatementKind::FakeRead(FakeReadCause::ForMatchGuard, _) => {
+                // Only relavent for liveness/safety checks.
             }
             StatementKind::SetDiscriminant {
                 ref place,
@@ -998,7 +1011,9 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
                 }
 
                 (Read(_), BorrowKind::Shared) | (Reservation(..), BorrowKind::Shared)
-                | (Read(_), BorrowKind::Guard) | (Reservation(..), BorrowKind::Guard) => {
+                | (Read(_), BorrowKind::Guard) | (Reservation(..), BorrowKind::Guard)
+                | (Read(ReadKind::Borrow(BorrowKind::Guard)), BorrowKind::Unique)
+                | (Read(ReadKind::Borrow(BorrowKind::Guard)), BorrowKind::Mut { .. })  => {
                     Control::Continue
                 }
 

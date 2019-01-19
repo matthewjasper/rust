@@ -41,7 +41,7 @@ fn main() {
 //         StorageLive(_3);
 //         _3 = const true;
 //         FakeRead(ForMatchedPlace, _3);
-//         switchInt(_3) -> [false: bb11, otherwise: bb10];
+//         switchInt(_3) -> [false: bb13, otherwise: bb12];
 //     }
 //     bb4: {
 //         resume;
@@ -55,25 +55,25 @@ fn main() {
 //         goto -> bb15;
 //     }
 //     bb7: {
-//         falseEdges -> [real: bb12, imaginary: bb8];
+//         falseEdges -> [real: bb10, imaginary: bb8];
 //     }
 //     bb8: {
-//         falseEdges -> [real: bb13, imaginary: bb9];
+//         falseEdges -> [real: bb11, imaginary: bb9];
 //     }
 //     bb9: {
 //         unreachable;
 //     }
 //     bb10: {
-//         goto -> bb8;
-//     }
-//     bb11: {
-//         goto -> bb7;
-//     }
-//     bb12: {
 //         goto -> bb5;
 //     }
-//     bb13: {
+//     bb11: {
 //         goto -> bb6;
+//     }
+//     bb12: {
+//         goto -> bb8;
+//     }
+//     bb13: {
+//         goto -> bb7;
 //     }
 //     bb14: {
 //         FakeRead(ForLet, _2);

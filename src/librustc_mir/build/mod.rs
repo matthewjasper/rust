@@ -459,25 +459,16 @@ enum LocalsForNode {
 
     /// The exceptional case is identifiers in a match arm's pattern
     /// that are referenced in a guard of that match arm. For these,
-    /// we can have `2+k` Locals, where `k` is the number of candidate
-    /// patterns (separated by `|`) in the arm.
+    /// we can have 2 Locals.
     ///
-    /// * `for_arm_body` is the Local used in the arm body (which is
+    /// * `value` is the Local used in the arm body (which is
     ///   just like the `One` case above),
     ///
-    /// * `ref_for_guard` is the Local used in the arm's guard (which
-    ///   is a reference to a temp that is an alias of
-    ///   `for_arm_body`).
-    ///
-    /// * `vals_for_guard` is the `k` Locals; at most one of them will
-    ///   get initialized by the arm's execution, and after it is
-    ///   initialized, `ref_for_guard` will be assigned a reference to
-    ///   it.
-    ///
-    /// There reason we have `k` Locals rather than just 1 is to
-    /// accommodate some restrictions imposed by two-phase borrows,
-    /// which apply when we have a `ref mut` pattern.
-    ForGuard { vals_for_guard: Vec<Local>, ref_for_guard: Local, for_arm_body: Local },
+    /// * `ref_for_guard` is the Local used in the arm's guard
+    ///   If the variable is bound by reference, it refers to
+    ///   `value`, otherwise it refers to the place that is
+    ///   bound to `value`.
+    ForGuard { ref_for_guard: Local, value: Local },
 }
 
 #[derive(Debug)]
@@ -516,27 +507,18 @@ struct GuardFrame {
 ///   3. the temp for use outside of guard expressions.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum ForGuard {
-    /// The `usize` identifies for which candidate pattern we want the
-    /// local binding. We keep a temp per-candidate to accommodate
-    /// two-phase borrows (see `LocalsForNode` documentation).
-    ValWithinGuard(usize),
     RefWithinGuard,
-    OutsideGuard,
+    Value,
 }
 
 impl LocalsForNode {
     fn local_id(&self, for_guard: ForGuard) -> Local {
         match (self, for_guard) {
-            (&LocalsForNode::One(local_id), ForGuard::OutsideGuard) |
+            (&LocalsForNode::One(local_id), ForGuard::Value) |
             (&LocalsForNode::ForGuard { ref_for_guard: local_id, .. }, ForGuard::RefWithinGuard) |
-            (&LocalsForNode::ForGuard { for_arm_body: local_id, .. }, ForGuard::OutsideGuard) =>
+            (&LocalsForNode::ForGuard { value: local_id, .. }, ForGuard::Value) =>
                 local_id,
 
-            (&LocalsForNode::ForGuard { ref vals_for_guard, .. },
-             ForGuard::ValWithinGuard(pat_idx)) =>
-                vals_for_guard[pat_idx],
-
-            (&LocalsForNode::One(_), ForGuard::ValWithinGuard(_)) |
             (&LocalsForNode::One(_), ForGuard::RefWithinGuard) =>
                 bug!("anything with one local should never be within a guard."),
         }
@@ -840,6 +822,8 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
     fn finish(self,
               yield_ty: Option<Ty<'tcx>>)
               -> Mir<'tcx> {
+        debug!("Built MIR cfg:\n{:#?}", self.cfg.basic_blocks);
+
         for (index, block) in self.cfg.basic_blocks.iter().enumerate() {
             if block.terminator.is_none() {
                 span_bug!(self.fn_span, "no terminator on block {:?}", index);
