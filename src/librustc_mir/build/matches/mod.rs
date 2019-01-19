@@ -87,9 +87,14 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
             })
             .collect();
 
-        // create binding start block for link them by false edges
+        // create binding start block so that we can link them by false edges
         let candidate_count = arms.iter().map(|c| c.patterns.len()).sum::<usize>();
         let pre_binding_blocks: Vec<_> = (0..=candidate_count)
+            .map(|_| self.cfg.start_new_block())
+            .collect();
+
+        // Create actual binding blocks so that we can rebind fake borrows here
+        let binding_blocks: Vec<_> = (0..candidate_count)
             .map(|_| self.cfg.start_new_block())
             .collect();
 
@@ -112,12 +117,13 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
             .zip(
                 pre_binding_blocks
                     .iter()
-                    .zip(pre_binding_blocks.iter().skip(1)),
+                    .zip(pre_binding_blocks.iter().skip(1))
+                    .zip(&binding_blocks),
             )
             .map(
                 |(
                     (arm_index, pat_index, pattern, guard),
-                    (pre_binding_block, next_candidate_pre_binding_block)
+                    ((pre_binding_block, next_candidate_pre_binding_block), binding_block)
                 )| {
                     has_guard |= guard.is_some();
 
@@ -150,6 +156,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
                         guard,
                         arm_index,
                         pat_index,
+                        binding_block: *binding_block,
                         pre_binding_block: *pre_binding_block,
                         next_candidate_pre_binding_block: *next_candidate_pre_binding_block,
                     }
@@ -175,9 +182,14 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
             None
         };
 
-        let pre_binding_blocks: Vec<_> = candidates
+        let fake_borrow_blocks: Vec<_> = candidates
             .iter()
-            .map(|cand| (cand.pre_binding_block, cand.span))
+            .map(|cand| (
+                cand.pre_binding_block,
+                cand.span,
+                cand.binding_block,
+                cand.guard.is_some(),
+            ))
             .collect();
 
         // this will generate code to test discriminant_place and
@@ -209,7 +221,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
         }
 
         if let Some(fake_borrows) = fake_borrows {
-            self.add_fake_borrows(&pre_binding_blocks, fake_borrows, source_info, block);
+            self.add_fake_borrows(&fake_borrow_blocks, fake_borrows, source_info, block);
         }
 
         // all the arm blocks will rejoin here
@@ -361,6 +373,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
             // since we don't call `match_candidates`, next fields is unused
             arm_index: 0,
             pat_index: 0,
+            binding_block: block,
             pre_binding_block: block,
             next_candidate_pre_binding_block: block,
         };
@@ -623,6 +636,9 @@ pub struct Candidate<'pat, 'tcx: 'pat> {
 
     // ...these types asserted...
     ascriptions: Vec<Ascription<'tcx>>,
+
+    // ... in this block ...
+    binding_block: BasicBlock,
 
     // ...and the guard must be evaluated...
     guard: Option<Guard<'tcx>>,
@@ -1125,15 +1141,15 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
             },
         );
 
-        block = self.cfg.start_new_block();
         self.cfg.terminate(
             candidate.pre_binding_block,
             candidate_source_info,
             TerminatorKind::FalseEdges {
-                real_target: block,
+                real_target: candidate.binding_block,
                 imaginary_targets: vec![candidate.next_candidate_pre_binding_block],
             },
         );
+        block = candidate.binding_block;
 
         // rust-lang/rust#27282: The `autoref` business deserves some
         // explanation here.
@@ -1240,8 +1256,15 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
                 self.bind_matched_candidate_for_arm_body(block, &candidate.bindings);
             }
 
-            // the block to branch to if the guard fails; if there is no
-            // guard, this block is simply unreachable
+            let guard_block = self.cfg.start_new_block();
+            self.cfg.terminate(
+                block,
+                candidate_source_info,
+                TerminatorKind::Goto { target: guard_block },
+            );
+
+            block = guard_block;
+
             let guard = match guard {
                 Guard::If(e) => self.hir.mirror(e),
             };
@@ -1255,6 +1278,8 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
                 );
             }
 
+            // the block to branch to if the guard fails; if there is no
+            // guard, this block is simply unreachable
             let false_edge_block = self.cfg.start_new_block();
 
             // We want to ensure that the matched candidates are bound
@@ -1581,7 +1606,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
     // will evaluate to the same thing until an arm has been chosen.
     fn add_fake_borrows<'pat>(
         &mut self,
-        pre_binding_blocks: &[(BasicBlock, Span)],
+        pre_binding_blocks: &[(BasicBlock, Span, BasicBlock, bool)],
         fake_borrows: FxHashMap<Place<'tcx>, BorrowKind>,
         source_info: SourceInfo,
         start_block: BasicBlock,
@@ -1627,24 +1652,38 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
                 Rvalue::Ref(tcx.types.re_erased, borrow_kind, matched_place.clone());
             let borrowed_input_ty = borrowed_input.ty(&self.local_decls, tcx);
             let borrowed_input_temp = self.temp(borrowed_input_ty, source_info.span);
+            // We rebind the fake borrows after we've bound variables so that
+            // we have a 'hole' in the borrow to allow us to bind any `ref mut`
+            // variables.
+            for &(_, _, binding_block, has_guard) in pre_binding_blocks {
+                if has_guard {
+                    self.cfg.push_assign(
+                        binding_block,
+                        source_info,
+                        &borrowed_input_temp,
+                        borrowed_input.clone(),
+                    );
+                }
+            }
+
             self.cfg.push_assign(
                 start_block,
                 source_info,
                 &borrowed_input_temp,
-                borrowed_input
+                borrowed_input,
             );
             borrowed_input_temps.push(borrowed_input_temp);
         }
 
         // FIXME: This could be a lot of reads (#fake borrows * #patterns).
         // The false edges that we currently generate would allow us to only do
-        // this on the last Candidate, but it's possible that there might not be
-        // so many false edges in the future, so we read for all Candidates for
-        // now.
+        // this on the last Candidate (or pre_binding_blocks.last()), but it's
+        // possible that there might not be so many false edges in the future,
+        // so we read for all Candidates for now.
         // Another option would be to make our own block and add our own false
         // edges to it.
         if tcx.emit_read_for_match() {
-            for &(pre_binding_block, span) in pre_binding_blocks {
+            for &(pre_binding_block, span, ..) in pre_binding_blocks {
                 let pattern_source_info = self.source_info(span);
                 for temp in &borrowed_input_temps {
                     self.cfg.push(pre_binding_block, Statement {
