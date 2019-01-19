@@ -17,7 +17,7 @@ fn main() {
 
 // END RUST SOURCE
 
-// START rustc.match_guard.CleanFakeReadsAndBorrows.before.mir
+// START rustc.match_guard.CleanupNonCodegenStatements.before.mir
 // bb0: {
 //     FakeRead(ForMatchedPlace, _1);
 //     _2 = discriminant(_1);
@@ -75,9 +75,9 @@ fn main() {
 // bb10: {
 //     resume;
 // }
-// END rustc.match_guard.CleanFakeReadsAndBorrows.before.mir
+// END rustc.match_guard.CleanupNonCodegenStatements.before.mir
 
-// START rustc.match_guard.CleanFakeReadsAndBorrows.after.mir
+// START rustc.match_guard.CleanupNonCodegenStatements.after.mir
 // bb0: {
 //     nop;
 //     _2 = discriminant(_1);
@@ -135,4 +135,4 @@ fn main() {
 // bb10: {
 //     resume;
 // }
-// END rustc.match_guard.CleanFakeReadsAndBorrows.after.mir
+// END rustc.match_guard.CleanupNonCodegenStatements.after.mir
