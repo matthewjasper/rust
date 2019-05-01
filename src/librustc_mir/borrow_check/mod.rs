@@ -25,7 +25,6 @@ use smallvec::SmallVec;
 
 use std::collections::BTreeMap;
 use std::mem;
-use std::rc::Rc;
 
 use syntax::ast::Name;
 use syntax_pos::{Span, DUMMY_SP};
@@ -203,8 +202,8 @@ fn do_mir_borrowck<'a, 'gcx, 'tcx>(
     ));
 
     let locals_are_invalidated_at_exit = tcx.hir().body_owner_kind_by_hir_id(id).is_fn_or_closure();
-    let borrow_set = Rc::new(BorrowSet::build(
-            tcx, mir, locals_are_invalidated_at_exit, &mdpe.move_data));
+    let borrow_set = &BorrowSet::build(
+            tcx, mir, locals_are_invalidated_at_exit, &mdpe.move_data);
 
     // If we are in non-lexical mode, compute the non-lexical lifetimes.
     let (regioncx, polonius_output, opt_closure_req) = nll::compute_regions(
@@ -226,7 +225,7 @@ fn do_mir_borrowck<'a, 'gcx, 'tcx>(
     // usage significantly on some benchmarks.
     drop(flow_inits);
 
-    let regioncx = Rc::new(regioncx);
+    let regioncx = &regioncx;
 
     let flow_borrows = FlowAtLocation::new(do_dataflow(
         tcx,
@@ -234,7 +233,7 @@ fn do_mir_borrowck<'a, 'gcx, 'tcx>(
         def_id,
         &attributes,
         &dead_unwinds,
-        Borrows::new(tcx, mir, regioncx.clone(), &borrow_set),
+        Borrows::new(tcx, mir, regioncx, &borrow_set),
         |rs, i| DebugFormatted::new(&rs.location(i)),
     ));
     let flow_uninits = FlowAtLocation::new(do_dataflow(
@@ -514,10 +513,10 @@ pub struct MirBorrowckCtxt<'cx, 'gcx: 'tcx, 'tcx: 'cx> {
     /// Non-lexical region inference context, if NLL is enabled. This
     /// contains the results from region inference and lets us e.g.
     /// find out which CFG points are contained in each borrow region.
-    nonlexical_regioncx: Rc<RegionInferenceContext<'tcx>>,
+    nonlexical_regioncx: &'cx RegionInferenceContext<'tcx>,
 
     /// The set of borrows extracted from the MIR
-    borrow_set: Rc<BorrowSet<'tcx>>,
+    borrow_set: &'cx BorrowSet<'tcx>,
 
     /// Dominators for MIR
     dominators: Dominators<BasicBlock>,
@@ -777,10 +776,9 @@ impl<'cx, 'gcx, 'tcx> DataflowResultsConsumer<'cx, 'tcx> for MirBorrowckCtxt<'cx
 
                 if self.movable_generator {
                     // Look for any active borrows to locals
-                    let borrow_set = self.borrow_set.clone();
                     flow_state.with_outgoing_borrows(|borrows| {
                         for i in borrows {
-                            let borrow = &borrow_set[i];
+                            let borrow = &self.borrow_set[i];
                             self.check_for_local_borrow(borrow, span);
                         }
                     });
@@ -792,10 +790,9 @@ impl<'cx, 'gcx, 'tcx> DataflowResultsConsumer<'cx, 'tcx> for MirBorrowckCtxt<'cx
                 // Often, the storage will already have been killed by an explicit
                 // StorageDead, but we don't always emit those (notably on unwind paths),
                 // so this "extra check" serves as a kind of backup.
-                let borrow_set = self.borrow_set.clone();
                 flow_state.with_outgoing_borrows(|borrows| {
                     for i in borrows {
-                        let borrow = &borrow_set[i];
+                        let borrow = &self.borrow_set[i];
                         let context = ContextKind::StorageDead.new(loc);
                         self.check_for_invalidation_at_exit(context, borrow, span);
                     }
@@ -1033,7 +1030,7 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
         let tcx = self.infcx.tcx;
         let mir = self.mir;
         let location = self.location_table.start_index(context.loc);
-        let borrow_set = self.borrow_set.clone();
+        let borrow_set = self.borrow_set;
         each_borrow_involving_path(
             self,
             tcx,
@@ -1547,7 +1544,7 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
         // Two-phase borrow support: For each activation that is newly
         // generated at this statement, check if it interferes with
         // another borrow.
-        let borrow_set = self.borrow_set.clone();
+        let borrow_set = self.borrow_set;
         for &borrow_index in borrow_set.activations_at_location(location) {
             let borrow = &borrow_set[borrow_index];
 

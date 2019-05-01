@@ -33,7 +33,7 @@ use std::rc::Rc;
 pub(super) fn trace(
     typeck: &mut TypeChecker<'_, 'gcx, 'tcx>,
     mir: &Mir<'tcx>,
-    elements: &Rc<RegionValueElements>,
+    elements: &RegionValueElements,
     flow_inits: &mut FlowAtLocation<'tcx, MaybeInitializedPlaces<'_, 'gcx, 'tcx>>,
     move_data: &MoveData<'tcx>,
     live_locals: Vec<Local>,

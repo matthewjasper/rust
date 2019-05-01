@@ -277,7 +277,7 @@ impl<N: Idx> RegionValues<N> {
     /// Each of the regions in num_region_variables will be initialized with an
     /// empty set of points and no causal information.
     crate fn new(
-        elements: &Rc<RegionValueElements>,
+        elements: Rc<RegionValueElements>,
         num_universal_regions: usize,
         placeholder_indices: &Rc<PlaceholderIndices>,
     ) -> Self {

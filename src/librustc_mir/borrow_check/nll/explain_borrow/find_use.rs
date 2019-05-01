@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::rc::Rc;
 
 use crate::borrow_check::nll::region_infer::{Cause, RegionInferenceContext};
 use crate::borrow_check::nll::ToRegionVid;
@@ -11,7 +10,7 @@ use rustc_data_structures::fx::FxHashSet;
 
 crate fn find<'tcx>(
     mir: &Mir<'tcx>,
-    regioncx: &Rc<RegionInferenceContext<'tcx>>,
+    regioncx: &RegionInferenceContext<'tcx>,
     tcx: TyCtxt<'_, '_, 'tcx>,
     region_vid: RegionVid,
     start_point: Location,
@@ -29,7 +28,7 @@ crate fn find<'tcx>(
 
 struct UseFinder<'cx, 'gcx: 'tcx, 'tcx: 'cx> {
     mir: &'cx Mir<'tcx>,
-    regioncx: &'cx Rc<RegionInferenceContext<'tcx>>,
+    regioncx: &'cx RegionInferenceContext<'tcx>,
     tcx: TyCtxt<'cx, 'gcx, 'tcx>,
     region_vid: RegionVid,
     start_point: Location,

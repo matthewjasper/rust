@@ -223,7 +223,7 @@ impl<'cx, 'tcx, 'gcx> Visitor<'tcx> for InvalidationGenerator<'cx, 'tcx, 'gcx> {
                 self.consume_operand(ContextKind::Yield.new(location), value);
 
                 // Invalidate all borrows of local places
-                let borrow_set = self.borrow_set.clone();
+                let borrow_set = self.borrow_set;
                 let resume = self.location_table.start_index(resume.start_location());
                 for i in borrow_set.borrows.indices() {
                     if borrow_of_local_data(&borrow_set.borrows[i].borrowed_place) {
@@ -233,7 +233,7 @@ impl<'cx, 'tcx, 'gcx> Visitor<'tcx> for InvalidationGenerator<'cx, 'tcx, 'gcx> {
             }
             TerminatorKind::Resume | TerminatorKind::Return | TerminatorKind::GeneratorDrop => {
                 // Invalidate all borrows of local places
-                let borrow_set = self.borrow_set.clone();
+                let borrow_set = self.borrow_set;
                 let start = self.location_table.start_index(location);
                 for i in borrow_set.borrows.indices() {
                     if borrow_of_local_data(&borrow_set.borrows[i].borrowed_place) {
@@ -403,7 +403,7 @@ impl<'cg, 'cx, 'tcx, 'gcx> InvalidationGenerator<'cx, 'tcx, 'gcx> {
         );
         let tcx = self.tcx;
         let mir = self.mir;
-        let borrow_set = self.borrow_set.clone();
+        let borrow_set = self.borrow_set;
         let indices = self.borrow_set.borrows.indices();
         each_borrow_involving_path(
             self,
@@ -411,7 +411,7 @@ impl<'cg, 'cx, 'tcx, 'gcx> InvalidationGenerator<'cx, 'tcx, 'gcx> {
             mir,
             context,
             (sd, place),
-            &borrow_set.clone(),
+            borrow_set,
             indices,
             |this, borrow_index, borrow| {
                 match (rw, borrow.kind) {

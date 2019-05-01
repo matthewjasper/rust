@@ -1,6 +1,3 @@
-use crate::borrow_check::borrow_set::{BorrowSet, BorrowData};
-use crate::borrow_check::place_ext::PlaceExt;
-
 use rustc::mir::{self, Location, Place, PlaceBase, Mir};
 use rustc::ty::TyCtxt;
 use rustc::ty::RegionVid;
@@ -10,11 +7,10 @@ use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::indexed_vec::{Idx, IndexVec};
 
 use crate::dataflow::{BitDenotation, BlockSets, InitialFlow};
+use crate::borrow_check::borrow_set::{BorrowSet, BorrowData};
 use crate::borrow_check::nll::region_infer::RegionInferenceContext;
-use crate::borrow_check::nll::ToRegionVid;
+use crate::borrow_check::place_ext::PlaceExt;
 use crate::borrow_check::places_conflict;
-
-use std::rc::Rc;
 
 newtype_index! {
     pub struct BorrowIndex {
@@ -33,11 +29,8 @@ pub struct Borrows<'a, 'gcx: 'tcx, 'tcx: 'a> {
     tcx: TyCtxt<'a, 'gcx, 'tcx>,
     mir: &'a Mir<'tcx>,
 
-    borrow_set: Rc<BorrowSet<'tcx>>,
+    borrow_set: &'a BorrowSet<'tcx>,
     borrows_out_of_scope_at_location: FxHashMap<Location, Vec<BorrowIndex>>,
-
-    /// NLL region inference context with which NLL queries should be resolved
-    _nonlexical_regioncx: Rc<RegionInferenceContext<'tcx>>,
 }
 
 struct StackEntry {
@@ -49,7 +42,7 @@ struct StackEntry {
 
 fn precompute_borrows_out_of_scope<'tcx>(
     mir: &Mir<'tcx>,
-    regioncx: &Rc<RegionInferenceContext<'tcx>>,
+    regioncx: &RegionInferenceContext<'tcx>,
     borrows_out_of_scope_at_location: &mut FxHashMap<Location, Vec<BorrowIndex>>,
     borrow_index: BorrowIndex,
     borrow_region: RegionVid,
@@ -137,12 +130,12 @@ impl<'a, 'gcx, 'tcx> Borrows<'a, 'gcx, 'tcx> {
     crate fn new(
         tcx: TyCtxt<'a, 'gcx, 'tcx>,
         mir: &'a Mir<'tcx>,
-        nonlexical_regioncx: Rc<RegionInferenceContext<'tcx>>,
-        borrow_set: &Rc<BorrowSet<'tcx>>,
+        nonlexical_regioncx: &RegionInferenceContext<'tcx>,
+        borrow_set: &'a BorrowSet<'tcx>,
     ) -> Self {
         let mut borrows_out_of_scope_at_location = FxHashMap::default();
         for (borrow_index, borrow_data) in borrow_set.borrows.iter_enumerated() {
-            let borrow_region = borrow_data.region.to_region_vid();
+            let borrow_region = borrow_data.region;
             let location = borrow_set.borrows[borrow_index].reserve_location;
 
             precompute_borrows_out_of_scope(mir, &nonlexical_regioncx,
@@ -153,9 +146,8 @@ impl<'a, 'gcx, 'tcx> Borrows<'a, 'gcx, 'tcx> {
         Borrows {
             tcx: tcx,
             mir: mir,
-            borrow_set: borrow_set.clone(),
+            borrow_set: borrow_set,
             borrows_out_of_scope_at_location,
-            _nonlexical_regioncx: nonlexical_regioncx,
         }
     }
 

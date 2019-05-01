@@ -10,7 +10,6 @@ use crate::dataflow::MaybeInitializedPlaces;
 use rustc::mir::{Local, Mir};
 use rustc::ty::{RegionVid, TyCtxt};
 use rustc_data_structures::fx::FxHashSet;
-use std::rc::Rc;
 
 use super::TypeChecker;
 
@@ -28,7 +27,7 @@ mod trace;
 pub(super) fn generate<'gcx, 'tcx>(
     typeck: &mut TypeChecker<'_, 'gcx, 'tcx>,
     mir: &Mir<'tcx>,
-    elements: &Rc<RegionValueElements>,
+    elements: &RegionValueElements,
     flow_inits: &mut FlowAtLocation<'tcx, MaybeInitializedPlaces<'_, 'gcx, 'tcx>>,
     move_data: &MoveData<'tcx>,
     location_table: &LocationTable,

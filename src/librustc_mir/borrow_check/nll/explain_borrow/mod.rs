@@ -232,7 +232,7 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
             context, borrow, kind_place
         );
 
-        let regioncx = &self.nonlexical_regioncx;
+        let regioncx = self.nonlexical_regioncx;
         let mir = self.mir;
         let tcx = self.infcx.tcx;
 
