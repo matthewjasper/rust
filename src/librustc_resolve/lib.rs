@@ -434,6 +434,15 @@ impl ModuleKind {
 
 type Resolutions<'a> = RefCell<FxHashMap<(Ident, Namespace), &'a RefCell<NameResolution<'a>>>>;
 
+// Map from the original binding that used `_` to the binding in the module.
+// The binding in the module could be the same binding, or a glob import.
+// We store the identifier so that we have the span for hygiene information and
+// error reporting.
+type UnderscoreResolutions<'a> = RefCell<FxHashMap<
+    (PtrKey<'a, NameBinding<'a>>, Ident),
+    (Namespace, &'a NameBinding<'a>),
+>>;
+
 /// One node in the tree of modules.
 pub struct ModuleData<'a> {
     parent: Option<Module<'a>>,
@@ -445,6 +454,9 @@ pub struct ModuleData<'a> {
     // Mapping between names and their (possibly in-progress) resolutions in this module.
     // Resolutions in modules from other crates are not populated until accessed.
     lazy_resolutions: Resolutions<'a>,
+    // Resolutions that come from underscores
+    lazy_underscores: UnderscoreResolutions<'a>,
+
     // True if this is a module from other crate that needs to be populated on access.
     populate_on_access: Cell<bool>,
 
@@ -478,6 +490,7 @@ impl<'a> ModuleData<'a> {
             kind,
             normal_ancestor_id,
             lazy_resolutions: Default::default(),
+            lazy_underscores: Default::default(),
             populate_on_access: Cell::new(!normal_ancestor_id.is_local()),
             unexpanded_invocations: Default::default(),
             no_implicit_prelude: false,
@@ -494,6 +507,9 @@ impl<'a> ModuleData<'a> {
     {
         for (&(ident, ns), name_resolution) in resolver.as_mut().resolutions(self).borrow().iter() {
             name_resolution.borrow().binding.map(|binding| f(resolver, ident, ns, binding));
+        }
+        for (&(_, ident), &(ns, binding)) in &*self.lazy_underscores.borrow() {
+            f(resolver, ident, ns, binding);
         }
     }
 

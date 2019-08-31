@@ -38,6 +38,7 @@ use log::*;
 
 use std::cell::Cell;
 use std::{mem, ptr};
+use std::collections::hash_map::Entry;
 
 type Res = def::Res<NodeId>;
 
@@ -78,7 +79,7 @@ crate struct ImportDirective<'a> {
     /// In the case where the `ImportDirective` was expanded from a "nested" use tree,
     /// this id is the ID of the leaf tree. For example:
     ///
-    /// ```ignore (pacify the mercilous tidy)
+    /// ```ignore (pacify the merciless tidy)
     /// use foo::bar::{a, b}
     /// ```
     ///
@@ -456,6 +457,12 @@ impl<'a> Resolver<'a> {
         let res = binding.res();
         self.check_reserved_macro_name(ident, res);
         self.set_binding_parent_module(binding, module);
+        if ident.name == kw::Underscore {
+            self.define_underscore(module, ident.modern(), ns, binding, binding);
+
+            return Ok(());
+        }
+
         self.update_resolution(module, ident, ns, |this, resolution| {
             if let Some(old_binding) = resolution.binding {
                 if res == Res::Err {
@@ -528,6 +535,9 @@ impl<'a> Resolver<'a> {
                                -> T
         where F: FnOnce(&mut Resolver<'a>, &mut NameResolution<'a>) -> T
     {
+        if ident.name == kw::Underscore {
+            span_bug!(ident.span, "update_resolution called with `_` identifier");
+        }
         // Ensure that `resolution` isn't borrowed when defining in the module's glob importers,
         // during which the resolution might end up getting re-defined via a glob cycle.
         let (binding, t) = {
@@ -563,6 +573,53 @@ impl<'a> Resolver<'a> {
         t
     }
 
+    // Add the binding with ident `_` to the given module. `original_binding` is
+    // the binding of the import or item that used `_`. `binding` is either the
+    // original binding or a glob import.
+    fn define_underscore(
+        &mut self,
+        module: Module<'a>,
+        ident: Ident,
+        ns: Namespace,
+        binding: &'a NameBinding<'a>,
+        original_binding: &'a NameBinding<'a>,
+    ) {
+        match module.lazy_underscores.borrow_mut().entry((PtrKey(original_binding), ident)) {
+            Entry::Vacant(v) => v.insert((ns, binding)),
+            Entry::Occupied(_) => return,
+        };
+
+        for directive in module.glob_importers.borrow_mut().iter() {
+            self.define_underscore_glob(module, ident, ns, binding, original_binding, directive);
+        }
+    }
+
+    fn define_underscore_glob(
+        &mut self,
+        module: Module<'a>,
+        mut ident: Ident,
+        ns: Namespace,
+        binding: &'a NameBinding<'a>,
+        original_binding: &'a NameBinding<'a>,
+        directive: &'a ImportDirective<'a>,
+    ) {
+        let scope = match ident.span.reverse_glob_adjust(module.expansion, directive.span) {
+            Some(Some(def)) => self.macro_def_scope(def),
+            Some(None) => directive.parent_scope.module,
+            None => return,
+        };
+        if self.is_accessible_from(binding.vis, scope) {
+            let imported_binding = self.import(binding, directive);
+            self.define_underscore(
+                directive.parent_scope.module,
+                ident,
+                ns,
+                imported_binding,
+                original_binding,
+            );
+        }
+    }
+
     // Define a "dummy" resolution containing a Res::Err as a placeholder for a
     // failed resolution
     fn import_dummy_binding(&mut self, directive: &'a ImportDirective<'a>) {
@@ -595,6 +652,12 @@ pub struct ImportResolver<'a, 'b> {
 impl<'a, 'b> ty::DefIdTree for &'a ImportResolver<'a, 'b> {
     fn parent(self, id: DefId) -> Option<DefId> {
         self.r.parent(id)
+    }
+}
+
+impl<'a> AsMut<Resolver<'a>> for ImportResolver<'_, 'a> {
+    fn as_mut(&mut self) -> &mut Resolver<'a> {
+        self.r
     }
 }
 
@@ -800,6 +863,9 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
             let parent = directive.parent_scope.module;
             match source_bindings[ns].get() {
                 Err(Undetermined) => indeterminate = true,
+                // We don't add a resolution for underscore imports, so there's
+                // no need to remove it.
+                Err(Determined) if target.name == kw::Underscore => {}
                 Err(Determined) => {
                     this.update_resolution(parent, target, ns, |_, resolution| {
                         resolution.single_imports.remove(&PtrKey(directive));
@@ -970,9 +1036,8 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
                     let initial_res = source_bindings[ns].get().map(|initial_binding| {
                         all_ns_err = false;
                         if let Some(target_binding) = target_bindings[ns].get() {
-                            // Note that as_str() de-gensyms the Symbol
-                            if target.name.as_str() == "_" &&
-                               initial_binding.is_extern_crate() && !initial_binding.is_import() {
+                            if target.name == kw::Underscore &&
+                                initial_binding.is_extern_crate() && !initial_binding.is_import() {
                                 this.record_use(ident, ns, target_binding,
                                                 directive.module_path.is_empty());
                             }
@@ -1288,6 +1353,15 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
             }
         }
 
+        let underscore_bindings = module.lazy_underscores.borrow().iter()
+            .map(|(&(PtrKey(orig_binding), ident), &(ns, binding))| {
+                (ident, ns, binding, orig_binding)
+            })
+            .collect::<Vec<_>>();
+        for (ident, ns, binding, orig_binding) in underscore_bindings {
+            self.r.define_underscore_glob(module, ident, ns, binding, orig_binding, directive);
+        }
+
         // Record the destination of this import
         self.r.record_partial_res(directive.id, PartialRes::new(module.res().unwrap()));
     }
@@ -1300,13 +1374,7 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
 
         let mut reexports = Vec::new();
 
-        for (&(ident, ns), resolution) in self.r.resolutions(module).borrow().iter() {
-            let resolution = &mut *resolution.borrow_mut();
-            let binding = match resolution.binding {
-                Some(binding) => binding,
-                None => continue,
-            };
-
+        module.for_each_child(self, |this, ident, ns, binding| {
             // Filter away ambiguous imports and anything that has def-site
             // hygiene.
             // FIXME: Implement actual cross-crate hygiene.
@@ -1317,7 +1385,7 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
                 if res != Res::Err {
                     if let Some(def_id) = res.opt_def_id() {
                         if !def_id.is_local() {
-                            self.r.cstore.export_macros_untracked(def_id.krate);
+                            this.r.cstore.export_macros_untracked(def_id.krate);
                         }
                     }
                     reexports.push(Export {
@@ -1331,7 +1399,7 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
 
             if let NameBindingKind::Import { binding: orig_binding, directive, .. } = binding.kind {
                 if ns == TypeNS && orig_binding.is_variant() &&
-                    !orig_binding.vis.is_at_least(binding.vis, &*self) {
+                    !orig_binding.vis.is_at_least(binding.vis, &*this) {
                         let msg = match directive.subclass {
                             ImportDirectiveSubclass::SingleImport { .. } => {
                                 format!("variant `{}` is private and cannot be re-exported",
@@ -1343,23 +1411,23 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
                                 let error_id = (DiagnosticMessageId::ErrorId(0), // no code?!
                                                 Some(binding.span),
                                                 msg.clone());
-                                let fresh = self.r.session.one_time_diagnostics
+                                let fresh = this.r.session.one_time_diagnostics
                                     .borrow_mut().insert(error_id);
                                 if !fresh {
-                                    continue;
+                                    return;
                                 }
                                 msg
                             },
                             ref s @ _ => bug!("unexpected import subclass {:?}", s)
                         };
-                        let mut err = self.r.session.struct_span_err(binding.span, &msg);
+                        let mut err = this.r.session.struct_span_err(binding.span, &msg);
 
                         let imported_module = match directive.imported_module.get() {
                             Some(ModuleOrUniformRoot::Module(module)) => module,
                             _ => bug!("module should exist"),
                         };
                         let parent_module = imported_module.parent.expect("parent should exist");
-                        let resolutions = self.r.resolutions(parent_module).borrow();
+                        let resolutions = this.r.resolutions(parent_module).borrow();
                         let enum_path_segment_index = directive.module_path.len() - 1;
                         let enum_ident = directive.module_path[enum_path_segment_index].ident;
 
@@ -1368,8 +1436,8 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
                         let enum_span = enum_resolution.borrow()
                             .binding.expect("binding should exist")
                             .span;
-                        let enum_def_span = self.r.session.source_map().def_span(enum_span);
-                        let enum_def_snippet = self.r.session.source_map()
+                        let enum_def_span = this.r.session.source_map().def_span(enum_span);
+                        let enum_def_snippet = this.r.session.source_map()
                             .span_to_snippet(enum_def_span).expect("snippet should exist");
                         // potentially need to strip extant `crate`/`pub(path)` for suggestion
                         let after_vis_index = enum_def_snippet.find("enum")
@@ -1377,7 +1445,7 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
                         let suggestion = format!("pub {}",
                                                  &enum_def_snippet[after_vis_index..]);
 
-                        self.r.session
+                        this.r.session
                             .diag_span_suggestion_once(&mut err,
                                                        DiagnosticMessageId::ErrorId(0),
                                                        enum_def_span,
@@ -1386,7 +1454,7 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
                         err.emit();
                 }
             }
-        }
+        });
 
         if reexports.len() > 0 {
             if let Some(def_id) = module.def_id() {
