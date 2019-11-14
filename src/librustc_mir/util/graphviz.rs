@@ -189,7 +189,7 @@ fn write_graph_label<'tcx, W: Write>(
     write!(w, ") -&gt; {}", escape(&body.return_ty()))?;
     write!(w, r#"<br align="left"/>"#)?;
 
-    for local in body.vars_and_temps_iter() {
+    for local in body.vars_iter() {
         let decl = &body.local_decls[local];
 
         write!(w, "let ")?;

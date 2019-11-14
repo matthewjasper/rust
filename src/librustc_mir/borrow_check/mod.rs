@@ -14,6 +14,7 @@ use rustc::mir::{
 };
 use rustc::mir::{Field, ProjectionElem, Promoted, Rvalue, Statement, StatementKind};
 use rustc::mir::{Terminator, TerminatorKind};
+use rustc::mir::borrowck::ExtraLocalInfo;
 use rustc::ty::query::Providers;
 use rustc::ty::{self, TyCtxt};
 
@@ -308,20 +309,30 @@ fn do_mir_borrowck<'a, 'tcx>(
     // would have a chance of erroneously adding non-user-defined mutable vars
     // to the set.
     let temporary_used_locals: FxHashSet<Local> = mbcx.used_mut.iter()
-        .filter(|&local| mbcx.body.local_decls[*local].is_user_variable.is_none())
+        .filter(|&local| !mbcx.is_user_variable(*local))
         .cloned()
         .collect();
     // For the remaining unused locals that are marked as mutable, we avoid linting any that
     // were never initialized. These locals may have been removed as unreachable code; or will be
     // linted as unused variables.
-    let unused_mut_locals = mbcx.body.mut_vars_iter()
-        .filter(|local| !mbcx.used_mut.contains(local))
+    let unused_mut_locals = mbcx.body.local_decls.iter_enumerated()
+        .filter(|local| {
+            local.mutability == Mutability::Mut
+                && mbcx.is_user_variable(*local)
+                && !mbcx.used_mut.contains(local)
+        })
         .collect();
     mbcx.gather_used_muts(temporary_used_locals, unused_mut_locals);
 
     debug!("mbcx.used_mut: {:?}", mbcx.used_mut);
     let used_mut = mbcx.used_mut;
-    for local in mbcx.body.mut_vars_and_args_iter().filter(|local| !used_mut.contains(local)) {
+    for (local, local_decl) in mbcx.body.local_decls.iter_enumerated() {
+        if local.mutability == Mutability::Not
+            || !mbcx.is_user_variable(*local)
+            || used_mut.contains(local)
+        {
+            continue;
+        }
         if let ClearCrossCrate::Set(ref vsi) = mbcx.body.source_scope_local_data {
             let local_decl = &mbcx.body.local_decls[local];
 
@@ -387,6 +398,7 @@ fn do_mir_borrowck<'a, 'tcx>(
 crate struct MirBorrowckCtxt<'cx, 'tcx> {
     crate infcx: &'cx InferCtxt<'cx, 'tcx>,
     body: &'cx Body<'tcx>,
+    extra_local_info: ExtraLocalInfo<'tcx>,
     mir_def_id: DefId,
     param_env: ty::ParamEnv<'tcx>,
     move_data: &'cx MoveData<'tcx>,
@@ -1287,7 +1299,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         match *operand {
             Operand::Move(ref place) | Operand::Copy(ref place) => {
                 match place.as_local() {
-                    Some(local) if self.body.local_decls[local].is_user_variable.is_none() => {
+                    Some(local) if !self.is_user_variable(local) => {
                         if self.body.local_decls[local].ty.is_mutable_ptr() {
                             // The variable will be marked as mutable by the borrow.
                             return;
@@ -2233,6 +2245,10 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 }
             }
         }
+    }
+
+    fn is_user_variable(&self, local: Local) -> bool {
+        self.extra_local_info[local].is_user_variable()
     }
 
     /// If `place` is a field projection, and the field is being projected from a closure type,

@@ -356,7 +356,7 @@ impl Inliner<'tcx> {
 
         let ptr_size = tcx.data_layout.pointer_size.bytes();
 
-        for v in callee_body.vars_and_temps_iter() {
+        for v in callee_body.vars_iter() {
             let v = &callee_body.local_decls[v];
             let ty = v.ty.subst(tcx, callsite.substs);
             // Cost of the var is the size in machine-words, if we know
@@ -407,7 +407,7 @@ impl Inliner<'tcx> {
                     scope_map.push(idx);
                 }
 
-                for loc in callee_body.vars_and_temps_iter() {
+                for loc in callee_body.vars_iter() {
                     let mut local = callee_body.local_decls[loc].clone();
 
                     local.source_info.scope =

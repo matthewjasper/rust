@@ -205,7 +205,7 @@ pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         let retptr = allocate_local(mir::RETURN_PLACE);
         iter::once(retptr)
             .chain(args.into_iter())
-            .chain(mir.vars_and_temps_iter().map(allocate_local))
+            .chain(mir.vars_iter().map(allocate_local))
             .collect()
     };
 
