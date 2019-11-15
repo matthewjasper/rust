@@ -63,6 +63,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             if let Some(tail_info) = this.block_context.currently_in_block_tail() {
                 local_decl = local_decl.block_tail(tail_info);
             }
+            this.extra_local_info.push(borrowck::LocalInfo::Other);
             this.local_decls.push(local_decl)
         };
         let temp_place = &Place::from(temp);

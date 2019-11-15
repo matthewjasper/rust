@@ -509,7 +509,7 @@ fn unsafety_check_result(tcx: TyCtxt<'_>, def_id: DefId) -> UnsafetyCheckResult 
 
     // N.B., this borrow is valid because all the consumers of
     // `mir_built` force this.
-    let body = &tcx.mir_built(def_id).borrow();
+    let body = &tcx.mir_built(def_id).0.borrow();
 
     let source_scope_local_data = match body.source_scope_local_data {
         ClearCrossCrate::Set(ref data) => data,

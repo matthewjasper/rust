@@ -448,6 +448,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                         let fake_borrow_temp = self.local_decls.push(
                             LocalDecl::new_temp(fake_borrow_ty, expr_span)
                         );
+                        self.extra_local_info.push(borrowck::LocalInfo::Other);
                         let projection = tcx.intern_place_elems(&base_place.projection[..idx]);
                         self.cfg.push_assign(
                             block,

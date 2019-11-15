@@ -209,7 +209,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                             } else {
                                 match (proj_base, base) {
                                     ([], PlaceBase::Local(local)) => {
-                                        if self.body.local_decls[*local].is_ref_for_guard() {
+                                        if self.extra_local_info[*local].is_ref_for_guard() {
                                             self.append_place_to_string(
                                                 PlaceRef {
                                                     base,

@@ -31,6 +31,9 @@ macro_rules! arena_types {
                     rustc::mir::Body<$tcx>
                 >
             >,
+            [] steal_local_info: rustc::ty::steal::Steal<
+                rustc::mir::borrowck::ExtraLocalInfo<$tcx>
+            >,
             [] promoted: rustc_index::vec::IndexVec<
                 rustc::mir::Promoted,
                 rustc::mir::Body<$tcx>

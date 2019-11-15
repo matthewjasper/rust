@@ -117,6 +117,7 @@ pub(crate) fn type_check<'tcx>(
     param_env: ty::ParamEnv<'tcx>,
     body: &Body<'tcx>,
     promoted: &IndexVec<Promoted, Body<'tcx>>,
+    extra_local_info: &borrowck::ExtraLocalInfo<'tcx>,
     mir_def_id: DefId,
     universal_regions: &Rc<UniversalRegions<'tcx>>,
     location_table: &LocationTable,
@@ -163,6 +164,7 @@ pub(crate) fn type_check<'tcx>(
         param_env,
         body,
         promoted,
+        extra_local_info,
         &region_bound_pairs,
         implicit_region_bound,
         &mut borrowck_context,
@@ -187,6 +189,7 @@ fn type_check_internal<'a, 'tcx, R>(
     param_env: ty::ParamEnv<'tcx>,
     body: &'a Body<'tcx>,
     promoted: &'a IndexVec<Promoted, Body<'tcx>>,
+    extra_local_info: &'a borrowck::ExtraLocalInfo<'tcx>,
     region_bound_pairs: &'a RegionBoundPairs<'tcx>,
     implicit_region_bound: ty::Region<'tcx>,
     borrowck_context: &'a mut BorrowCheckContext<'a, 'tcx>,
@@ -196,6 +199,7 @@ fn type_check_internal<'a, 'tcx, R>(
     let mut checker = TypeChecker::new(
         infcx,
         body,
+        extra_local_info,
         mir_def_id,
         param_env,
         region_bound_pairs,
@@ -353,7 +357,7 @@ impl<'a, 'b, 'tcx> Visitor<'tcx> for TypeVerifier<'a, 'b, 'tcx> {
         self.sanitize_type(local_decl, local_decl.ty);
 
         for (user_ty, span) in local_decl.user_ty.projections_and_spans() {
-            let ty = if !local_decl.is_nonref_binding() {
+            let ty = if !self.cx.extra_local_info[local].is_nonref_binding() {
                 // If we have a binding of the form `let ref x: T = ..` then remove the outermost
                 // reference so we can check the type annotation for the remaining type.
                 if let ty::Ref(_, rty, _) = local_decl.ty.kind {
@@ -840,6 +844,7 @@ struct TypeChecker<'a, 'tcx> {
     param_env: ty::ParamEnv<'tcx>,
     last_span: Span,
     body: &'a Body<'tcx>,
+    extra_local_info: &'a borrowck::ExtraLocalInfo<'tcx>,
     /// User type annotations are shared between the main MIR and the MIR of
     /// all of the promoted items.
     user_type_annotations: &'a CanonicalUserTypeAnnotations<'tcx>,
@@ -989,6 +994,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
     fn new(
         infcx: &'a InferCtxt<'a, 'tcx>,
         body: &'a Body<'tcx>,
+        extra_local_info: &'a borrowck::ExtraLocalInfo<'tcx>,
         mir_def_id: DefId,
         param_env: ty::ParamEnv<'tcx>,
         region_bound_pairs: &'a RegionBoundPairs<'tcx>,
@@ -1001,6 +1007,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
             last_span: DUMMY_SP,
             mir_def_id,
             body,
+            extra_local_info,
             user_type_annotations: &body.user_type_annotations,
             param_env,
             region_bound_pairs,
@@ -1387,7 +1394,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                     } else {
                         ConstraintCategory::Return
                     },
-                    Some(l) if !body.local_decls[l].is_user_variable.is_some() => {
+                    Some(l) if !self.extra_local_info[l].is_user_variable() => {
                         ConstraintCategory::Boring
                     }
                     _ => ConstraintCategory::Assignment,
@@ -1693,7 +1700,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                             ConstraintCategory::Return
                         }
                     }
-                    Some(l) if !body.local_decls[l].is_user_variable.is_some() => {
+                    Some(l) if !self.extra_local_info[l].is_user_variable() => {
                         ConstraintCategory::Boring
                     }
                     _ => ConstraintCategory::Assignment,

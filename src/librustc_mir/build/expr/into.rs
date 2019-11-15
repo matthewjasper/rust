@@ -9,6 +9,7 @@ use rustc_data_structures::fx::FxHashMap;
 use syntax_pos::symbol::sym;
 
 use rustc_target::spec::abi::Abi;
+use rustc::mir::borrowck::LocalInfo;
 
 impl<'a, 'tcx> Builder<'a, 'tcx> {
     /// Compile `expr`, storing the result into `destination`, which
@@ -231,9 +232,9 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                         source_info,
                         visibility_scope: source_info.scope,
                         internal: true,
-                        is_user_variable: None,
                         is_block_tail: None,
                     });
+                    this.extra_local_info.push(borrowck::LocalInfo::Other);
                     let ptr_temp = Place::from(ptr_temp);
                     let block = unpack!(this.into(&ptr_temp, block, ptr));
                     this.into(&this.hir.tcx().mk_place_deref(ptr_temp), block, val)
@@ -404,6 +405,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 if !destination.projection.is_empty() {
                     this.local_decls
                         .push(LocalDecl::new_temp(expr.ty, expr.span));
+                    this.extra_local_info.push(LocalInfo::Other);
                 }
 
                 debug_assert!(Category::of(&expr.kind) == Some(Category::Place));

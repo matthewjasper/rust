@@ -2,10 +2,11 @@ use rustc::hir;
 use rustc::hir::def_id::DefId;
 use rustc::hir::{AsyncGeneratorKind, GeneratorKind};
 use rustc::mir::{
-    self, AggregateKind, BindingForm, BorrowKind, ClearCrossCrate, ConstraintCategory,
-    FakeReadCause, Local, LocalDecl, LocalKind, Location, Operand, Place, PlaceBase, PlaceRef,
-    ProjectionElem, Rvalue, Statement, StatementKind, TerminatorKind, VarBindingForm,
+    self, AggregateKind, BorrowKind, ConstraintCategory, FakeReadCause, Local,
+    LocalKind, Location, Operand, Place, PlaceBase, PlaceRef, ProjectionElem,
+    Rvalue, Statement, StatementKind, TerminatorKind,
 };
+use rustc::mir::borrowck::LocalInfo;
 use rustc::ty::{self, Ty};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_index::vec::Idx;
@@ -1494,11 +1495,11 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         assigned_span: Span,
         err_place: &Place<'tcx>,
     ) {
-        let (from_arg, local_decl) = if let Some(local) = err_place.as_local() {
+        let (from_arg, local_info) = if let Some(local) = err_place.as_local() {
             if let LocalKind::Arg = self.body.local_kind(local) {
-                (true, Some(&self.body.local_decls[local]))
+                (true, Some(&self.extra_local_info[local]))
             } else {
-                (false, Some(&self.body.local_decls[local]))
+                (false, Some(&self.extra_local_info[local]))
             }
         } else {
             (false, None)
@@ -1507,25 +1508,15 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         // If root local is initialized immediately (everything apart from let
         // PATTERN;) then make the error refer to that local, rather than the
         // place being assigned later.
-        let (place_description, assigned_span) = match local_decl {
-            Some(LocalDecl {
-                is_user_variable: Some(ClearCrossCrate::Clear),
-                ..
-            })
-            | Some(LocalDecl {
-                is_user_variable:
-                    Some(ClearCrossCrate::Set(BindingForm::Var(VarBindingForm {
-                        opt_match_place: None,
-                        ..
-                    }))),
-                ..
-            })
-            | Some(LocalDecl {
-                is_user_variable: None,
-                ..
-            })
+        let (place_description, assigned_span) = match local_info {
+            Some(LocalInfo::Local { opt_match_place: None, .. })
+            | Some(LocalInfo::Other)
             | None => (self.describe_place(place.as_ref()), assigned_span),
-            Some(decl) => (self.describe_place(err_place.as_ref()), decl.source_info.span),
+            Some(LocalInfo::Local { opt_match_place: Some(_), .. })
+            | Some(LocalInfo::ImplicitSelf { .. }) => (
+                self.describe_place(err_place.as_ref()),
+                self.body.local_decls[err_place.as_local().unwrap()].source_info.span,
+            )
         };
 
         let mut err = self.cannot_reassign_immutable(
@@ -1547,16 +1538,15 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 err.span_label(assigned_span, format!("first assignment to {}", value_msg));
             }
         }
-        if let Some(decl) = local_decl {
+        if local_info.map_or(false, |info| info.can_be_made_mutable()) {
+            let decl = &self.body.local_decls[err_place.as_local().unwrap()];
             if let Some(name) = decl.name {
-                if decl.can_be_made_mutable() {
-                    err.span_suggestion(
-                        decl.source_info.span,
-                        "make this binding mutable",
-                        format!("mut {}", name),
-                        Applicability::MachineApplicable,
-                    );
-                }
+                err.span_suggestion(
+                    decl.source_info.span,
+                    "make this binding mutable",
+                    format!("mut {}", name),
+                    Applicability::MachineApplicable,
+                );
             }
         }
         err.span_label(span, msg);

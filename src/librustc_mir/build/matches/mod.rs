@@ -458,10 +458,10 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             for binding in &candidate.bindings {
                 let local = self.var_local_id(binding.var_id, OutsideGuard);
 
-                if let Some(ClearCrossCrate::Set(BindingForm::Var(VarBindingForm {
+                if let borrowck::LocalInfo::Local {
                     opt_match_place: Some((ref mut match_place, _)),
                     ..
-                }))) = self.local_decls[local].is_user_variable
+                } = self.extra_local_info[local]
                 {
                     *match_place = Some(initializer.clone());
                 } else {
@@ -1329,6 +1329,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             let fake_borrow_temp = self.local_decls.push(
                 LocalDecl::new_temp(fake_borrow_ty, temp_span)
             );
+            self.extra_local_info.push(borrowck::LocalInfo::Other);
 
             (matched_place, fake_borrow_temp)
         }).collect()
@@ -1734,18 +1735,19 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             visibility_scope,
             internal: false,
             is_block_tail: None,
-            is_user_variable: Some(ClearCrossCrate::Set(BindingForm::Var(VarBindingForm {
-                binding_mode,
-                // hypothetically, `visit_bindings` could try to unzip
-                // an outermost hir::Ty as we descend, matching up
-                // idents in pat; but complex w/ unclear UI payoff.
-                // Instead, just abandon providing diagnostic info.
-                opt_ty_info: None,
-                opt_match_place,
-                pat_span,
-            }))),
         };
         let for_arm_body = self.local_decls.push(local);
+        self.extra_local_info.push(borrowck::LocalInfo::Local {
+            binding_mode,
+            // hypothetically, `visit_bindings` could try to unzip
+            // an outermost hir::Ty as we descend, matching up
+            // idents in pat; but complex w/ unclear UI payoff.
+            // Instead, just abandon providing diagnostic info.
+            opt_ty_info: None,
+            opt_match_place,
+            pat_span,
+            ref_for_guard: false,
+        });
         let locals = if has_guard.0 {
             let ref_for_guard = self.local_decls.push(LocalDecl::<'tcx> {
                 // This variable isn't mutated but has a name, so has to be
@@ -1758,7 +1760,13 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 visibility_scope,
                 internal: false,
                 is_block_tail: None,
-                is_user_variable: Some(ClearCrossCrate::Set(BindingForm::RefForGuard)),
+            });
+            self.extra_local_info.push(borrowck::LocalInfo::Local {
+                binding_mode,
+                opt_match_place: None,
+                opt_ty_info: None,
+                pat_span,
+                ref_for_guard: true,
             });
             LocalsForNode::ForGuard {
                 ref_for_guard,

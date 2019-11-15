@@ -691,7 +691,6 @@ macro_rules! make_mir_visitor {
                     source_info,
                     visibility_scope,
                     internal: _,
-                    is_user_variable: _,
                     is_block_tail: _,
                 } = local_decl;
 

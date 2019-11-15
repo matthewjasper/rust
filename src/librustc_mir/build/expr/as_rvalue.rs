@@ -109,6 +109,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 let result = this
                     .local_decls
                     .push(LocalDecl::new_internal(expr.ty, expr_span));
+                this.extra_local_info.push(borrowck::LocalInfo::Other);
                 this.cfg.push(
                     block,
                     Statement {
@@ -416,6 +417,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         let temp = this
             .local_decls
             .push(LocalDecl::new_temp(upvar_ty, upvar_span));
+        this.extra_local_info.push(borrowck::LocalInfo::Other);
 
         this.cfg.push(
             block,
@@ -437,7 +439,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 projection: &[ProjectionElem::Deref],
             } => {
                 debug_assert!(
-                    this.local_decls[local].is_ref_for_guard(),
+                    this.extra_local_info[local].is_ref_for_guard(),
                     "Unexpected capture place",
                 );
                 this.local_decls[local].mutability

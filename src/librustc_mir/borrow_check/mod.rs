@@ -93,7 +93,8 @@ fn mir_borrowck(tcx: TyCtxt<'_>, def_id: DefId) -> BorrowCheckResult<'_> {
     let opt_closure_req = tcx.infer_ctxt().enter(|infcx| {
         let input_body: &Body<'_> = &input_body.borrow();
         let promoted: &IndexVec<_, _> = &promoted.borrow();
-        do_mir_borrowck(&infcx, input_body, promoted, def_id)
+        let extra_local_info = tcx.mir_built(def_id).1.steal();
+        do_mir_borrowck(&infcx, input_body, promoted, extra_local_info, def_id)
     });
     debug!("mir_borrowck done");
 
@@ -104,9 +105,16 @@ fn do_mir_borrowck<'a, 'tcx>(
     infcx: &InferCtxt<'a, 'tcx>,
     input_body: &Body<'tcx>,
     input_promoted: &IndexVec<Promoted, Body<'tcx>>,
+    extra_local_info: ExtraLocalInfo<'tcx>,
     def_id: DefId,
 ) -> BorrowCheckResult<'tcx> {
     debug!("do_mir_borrowck(def_id = {:?})", def_id);
+
+    assert_eq!(
+        extra_local_info.len(),
+        input_body.local_decls.len(),
+        "Numbers of `LocalDecls` and `LocalInfo`s have changed since MIR construction"
+    );
 
     let tcx = infcx.tcx;
     let attributes = tcx.get_attrs(def_id);
@@ -190,6 +198,7 @@ fn do_mir_borrowck<'a, 'tcx>(
         free_regions,
         body,
         &promoted,
+        &extra_local_info,
         &upvars,
         location_table,
         param_env,
@@ -247,6 +256,7 @@ fn do_mir_borrowck<'a, 'tcx>(
     let mut mbcx = MirBorrowckCtxt {
         infcx,
         body,
+        extra_local_info,
         mir_def_id: def_id,
         param_env,
         move_data: &mdpe.move_data,
@@ -316,20 +326,24 @@ fn do_mir_borrowck<'a, 'tcx>(
     // were never initialized. These locals may have been removed as unreachable code; or will be
     // linted as unused variables.
     let unused_mut_locals = mbcx.body.local_decls.iter_enumerated()
-        .filter(|local| {
-            local.mutability == Mutability::Mut
-                && mbcx.is_user_variable(*local)
-                && !mbcx.used_mut.contains(local)
+        .filter_map(|(local, local_decl)| {
+            if local_decl.mutability == Mutability::Mut
+                && mbcx.is_user_variable(local)
+                && !mbcx.used_mut.contains(&local)
+            {
+                Some(local)
+            } else {
+                None
+            }
         })
         .collect();
     mbcx.gather_used_muts(temporary_used_locals, unused_mut_locals);
 
     debug!("mbcx.used_mut: {:?}", mbcx.used_mut);
-    let used_mut = mbcx.used_mut;
     for (local, local_decl) in mbcx.body.local_decls.iter_enumerated() {
-        if local.mutability == Mutability::Not
-            || !mbcx.is_user_variable(*local)
-            || used_mut.contains(local)
+        if local_decl.mutability == Mutability::Not
+            || !mbcx.is_user_variable(local)
+            || mbcx.used_mut.contains(&local)
         {
             continue;
         }

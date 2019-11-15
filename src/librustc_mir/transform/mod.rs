@@ -1,7 +1,7 @@
 use crate::{build, shim};
 use rustc_index::vec::IndexVec;
 use rustc::hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
-use rustc::mir::{Body, MirPhase, Promoted};
+use rustc::mir::{borrowck, Body, MirPhase, Promoted};
 use rustc::ty::{TyCtxt, InstanceDef};
 use rustc::ty::query::Providers;
 use rustc::ty::steal::Steal;
@@ -97,9 +97,12 @@ fn mir_keys(tcx: TyCtxt<'_>, krate: CrateNum) -> &DefIdSet {
     tcx.arena.alloc(set)
 }
 
-fn mir_built(tcx: TyCtxt<'_>, def_id: DefId) -> &Steal<Body<'_>> {
-    let mir = build::mir_build(tcx, def_id);
-    tcx.alloc_steal_mir(mir)
+fn mir_built(
+    tcx: TyCtxt<'_>,
+    def_id: DefId,
+) -> (&Steal<Body<'_>>, &Steal<borrowck::ExtraLocalInfo<'_>>) {
+    let (mir, extra) = build::mir_build(tcx, def_id);
+    (tcx.alloc_steal_mir(mir), tcx.alloc_steal_local_info(extra))
 }
 
 /// Where a specific `mir::Body` comes from.
@@ -189,12 +192,11 @@ fn mir_const(tcx: TyCtxt<'_>, def_id: DefId) -> &Steal<Body<'_>> {
     // Unsafety check uses the raw mir, so make sure it is run
     let _ = tcx.unsafety_check_result(def_id);
 
-    let mut body = tcx.mir_built(def_id).steal();
+    let mut body = tcx.mir_built(def_id).0.steal();
     run_passes(tcx, &mut body, InstanceDef::Item(def_id), None, MirPhase::Const, &[
         // What we need to do constant evaluation.
         &simplify::SimplifyCfg::new("initial"),
         &rustc_peek::SanityCheck,
-        &uniform_array_move_out::UniformArrayMoveOut,
     ]);
     tcx.alloc_steal_mir(body)
 }
@@ -238,6 +240,7 @@ fn run_optimization_passes<'tcx>(
         &simplify::SimplifyCfg::new("early-opt"),
 
         // These next passes must be executed together
+        &uniform_array_move_out::UniformArrayMoveOut,
         &add_call_guards::CriticalCallEdges,
         &elaborate_drops::ElaborateDrops,
         &no_landing_pads::NoLandingPads::new(tcx),

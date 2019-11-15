@@ -152,7 +152,6 @@ fn temp_decl(mutability: Mutability, ty: Ty<'_>, span: Span) -> LocalDecl<'_> {
         source_info,
         visibility_scope: source_info.scope,
         internal: false,
-        is_user_variable: None,
         is_block_tail: None,
     }
 }

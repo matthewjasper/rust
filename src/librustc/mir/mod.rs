@@ -42,6 +42,7 @@ use syntax_pos::{Span, DUMMY_SP};
 pub use crate::mir::interpret::AssertMessage;
 
 mod cache;
+pub mod borrowck;
 pub mod interpret;
 pub mod mono;
 pub mod tcx;
@@ -70,7 +71,8 @@ impl<'tcx> HasLocalDecls<'tcx> for Body<'tcx> {
 /// The various "big phases" that MIR goes through.
 ///
 /// Warning: ordering of variants is significant.
-#[derive(Copy, Clone, RustcEncodable, RustcDecodable, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(RustcEncodable, RustcDecodable, HashStable)]
 pub enum MirPhase {
     Build = 0,
     Const = 1,
@@ -286,20 +288,6 @@ impl<'tcx> Body<'tcx> {
         }
     }
 
-    /// Returns an iterator over all user-declared mutable locals.
-    #[inline]
-    pub fn mut_vars_iter<'a>(&'a self) -> impl Iterator<Item = Local> + 'a {
-        (self.arg_count + 1..self.local_decls.len()).filter_map(move |index| {
-            let local = Local::new(index);
-            let decl = &self.local_decls[local];
-            if decl.is_user_variable.is_some() && decl.mutability == Mutability::Mut {
-                Some(local)
-            } else {
-                None
-            }
-        })
-    }
-
     /// Returns an iterator over all function arguments.
     #[inline]
     pub fn args_iter(&self) -> impl Iterator<Item = Local> {
@@ -310,7 +298,7 @@ impl<'tcx> Body<'tcx> {
     /// Returns an iterator over all user-defined variables and compiler-generated temporaries (all
     /// locals that are neither arguments nor the return place).
     #[inline]
-    pub fn vars_and_temps_iter(&self) -> impl Iterator<Item = Local> {
+    pub fn vars_iter(&self) -> impl Iterator<Item = Local> {
         let arg_count = self.arg_count;
         let local_count = self.local_decls.len();
         (arg_count + 1..local_count).map(Local::new)
@@ -567,96 +555,6 @@ pub enum LocalKind {
     ReturnPointer,
 }
 
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
-pub struct VarBindingForm<'tcx> {
-    /// Is variable bound via `x`, `mut x`, `ref x`, or `ref mut x`?
-    pub binding_mode: ty::BindingMode,
-    /// If an explicit type was provided for this variable binding,
-    /// this holds the source Span of that type.
-    ///
-    /// NOTE: if you want to change this to a `HirId`, be wary that
-    /// doing so breaks incremental compilation (as of this writing),
-    /// while a `Span` does not cause our tests to fail.
-    pub opt_ty_info: Option<Span>,
-    /// Place of the RHS of the =, or the subject of the `match` where this
-    /// variable is initialized. None in the case of `let PATTERN;`.
-    /// Some((None, ..)) in the case of and `let [mut] x = ...` because
-    /// (a) the right-hand side isn't evaluated as a place expression.
-    /// (b) it gives a way to separate this case from the remaining cases
-    ///     for diagnostics.
-    pub opt_match_place: Option<(Option<Place<'tcx>>, Span)>,
-    /// The span of the pattern in which this variable was bound.
-    pub pat_span: Span,
-}
-
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
-pub enum BindingForm<'tcx> {
-    /// This is a binding for a non-`self` binding, or a `self` that has an explicit type.
-    Var(VarBindingForm<'tcx>),
-    /// Binding for a `self`/`&self`/`&mut self` binding where the type is implicit.
-    ImplicitSelf(ImplicitSelfKind),
-    /// Reference used in a guard expression to ensure immutability.
-    RefForGuard,
-}
-
-/// Represents what type of implicit self a function has, if any.
-#[derive(Clone, Copy, PartialEq, Debug, RustcEncodable, RustcDecodable)]
-pub enum ImplicitSelfKind {
-    /// Represents a `fn x(self);`.
-    Imm,
-    /// Represents a `fn x(mut self);`.
-    Mut,
-    /// Represents a `fn x(&self);`.
-    ImmRef,
-    /// Represents a `fn x(&mut self);`.
-    MutRef,
-    /// Represents when a function does not have a self argument or
-    /// when a function has a `self: X` argument.
-    None,
-}
-
-CloneTypeFoldableAndLiftImpls! { BindingForm<'tcx>, }
-
-impl_stable_hash_for!(struct self::VarBindingForm<'tcx> {
-    binding_mode,
-    opt_ty_info,
-    opt_match_place,
-    pat_span
-});
-
-impl_stable_hash_for!(enum self::ImplicitSelfKind {
-    Imm,
-    Mut,
-    ImmRef,
-    MutRef,
-    None
-});
-
-impl_stable_hash_for!(enum self::MirPhase {
-    Build,
-    Const,
-    Validated,
-    Optimized,
-});
-
-mod binding_form_impl {
-    use crate::ich::StableHashingContext;
-    use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
-
-    impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for super::BindingForm<'tcx> {
-        fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
-            use super::BindingForm::*;
-            ::std::mem::discriminant(self).hash_stable(hcx, hasher);
-
-            match self {
-                Var(binding) => binding.hash_stable(hcx, hasher),
-                ImplicitSelf(kind) => kind.hash_stable(hcx, hasher),
-                RefForGuard => (),
-            }
-        }
-    }
-}
-
 /// `BlockTailInfo` is attached to the `LocalDecl` for temporaries
 /// created during evaluation of expressions in a block tail
 /// expression; that is, a block like `{ STMT_1; STMT_2; EXPR }`.
@@ -685,17 +583,9 @@ impl_stable_hash_for!(struct BlockTailInfo { tail_result_is_ignored });
 pub struct LocalDecl<'tcx> {
     /// Whether this is a mutable minding (i.e., `let x` or `let mut x`).
     ///
-    /// Temporaries and the return place are always mutable.
+    /// The return place is always mutable.
+    // FIXME(matthewjasper) Move this to ExtraLocalInfo
     pub mutability: Mutability,
-
-    /// `Some(binding_mode)` if this corresponds to a user-declared local variable.
-    ///
-    /// This is solely used for local diagnostics when generating
-    /// warnings/errors when compiling the current crate, and
-    /// therefore it need not be visible across crates. pnkfelix
-    /// currently hypothesized we *need* to wrap this in a
-    /// `ClearCrossCrate` as long as it carries as `HirId`.
-    pub is_user_variable: Option<ClearCrossCrate<BindingForm<'tcx>>>,
 
     /// `true` if this is an internal local.
     ///
@@ -720,6 +610,7 @@ pub struct LocalDecl<'tcx> {
     /// then it is a temporary created for evaluation of some
     /// subexpression of some block's tail expression (with no
     /// intervening statement context).
+    // FIXME(matthewjasper) Move this to ExtraLocalInfo
     pub is_block_tail: Option<BlockTailInfo>,
 
     /// The type of this local.
@@ -729,6 +620,7 @@ pub struct LocalDecl<'tcx> {
     /// e.g., via `let x: T`, then we carry that type here. The MIR
     /// borrow checker needs this information since it can affect
     /// region inference.
+    // FIXME(matthewjasper) Move this to ExtraLocalInfo
     pub user_ty: UserTypeProjections,
 
     /// The name of the local, used in debuginfo and pretty-printing.
@@ -824,55 +716,6 @@ pub struct LocalDecl<'tcx> {
 }
 
 impl<'tcx> LocalDecl<'tcx> {
-    /// Returns `true` only if local is a binding that can itself be
-    /// made mutable via the addition of the `mut` keyword, namely
-    /// something like the occurrences of `x` in:
-    /// - `fn foo(x: Type) { ... }`,
-    /// - `let x = ...`,
-    /// - or `match ... { C(x) => ... }`
-    pub fn can_be_made_mutable(&self) -> bool {
-        match self.is_user_variable {
-            Some(ClearCrossCrate::Set(BindingForm::Var(VarBindingForm {
-                binding_mode: ty::BindingMode::BindByValue(_),
-                opt_ty_info: _,
-                opt_match_place: _,
-                pat_span: _,
-            }))) => true,
-
-            Some(ClearCrossCrate::Set(BindingForm::ImplicitSelf(ImplicitSelfKind::Imm))) => true,
-
-            _ => false,
-        }
-    }
-
-    /// Returns `true` if local is definitely not a `ref ident` or
-    /// `ref mut ident` binding. (Such bindings cannot be made into
-    /// mutable bindings, but the inverse does not necessarily hold).
-    pub fn is_nonref_binding(&self) -> bool {
-        match self.is_user_variable {
-            Some(ClearCrossCrate::Set(BindingForm::Var(VarBindingForm {
-                binding_mode: ty::BindingMode::BindByValue(_),
-                opt_ty_info: _,
-                opt_match_place: _,
-                pat_span: _,
-            }))) => true,
-
-            Some(ClearCrossCrate::Set(BindingForm::ImplicitSelf(_))) => true,
-
-            _ => false,
-        }
-    }
-
-    /// Returns `true` if this is a reference to a variable bound in a `match`
-    /// expression that is used to access said variable for the guard of the
-    /// match arm.
-    pub fn is_ref_for_guard(&self) -> bool {
-        match self.is_user_variable {
-            Some(ClearCrossCrate::Set(BindingForm::RefForGuard)) => true,
-            _ => false,
-        }
-    }
-
     /// Returns `true` is the local is from a compiler desugaring, e.g.,
     /// `__next` from a `for` loop.
     #[inline]
@@ -917,7 +760,6 @@ impl<'tcx> LocalDecl<'tcx> {
             source_info: SourceInfo { span, scope: OUTERMOST_SOURCE_SCOPE },
             visibility_scope: OUTERMOST_SOURCE_SCOPE,
             internal,
-            is_user_variable: None,
             is_block_tail: None,
         }
     }
@@ -936,7 +778,6 @@ impl<'tcx> LocalDecl<'tcx> {
             internal: false,
             is_block_tail: None,
             name: None, // FIXME maybe we do want some name here?
-            is_user_variable: None,
         }
     }
 }
@@ -2927,7 +2768,6 @@ BraceStructTypeFoldableImpl! {
 BraceStructTypeFoldableImpl! {
     impl<'tcx> TypeFoldable<'tcx> for LocalDecl<'tcx> {
         mutability,
-        is_user_variable,
         internal,
         ty,
         user_ty,

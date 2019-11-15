@@ -22,7 +22,7 @@ use crate::middle::cstore::EncodedMetadata;
 use crate::middle::lang_items;
 use crate::middle::resolve_lifetime::{self, ObjectLifetimeDefault};
 use crate::middle::stability;
-use crate::mir::{Body, Field, interpret, Local, Place, PlaceElem, ProjectionKind, Promoted};
+use crate::mir::{self, Body, Field, interpret, Local, Place, PlaceElem, ProjectionKind, Promoted};
 use crate::mir::interpret::{ConstValue, Allocation, Scalar};
 use crate::ty::subst::{GenericArg, InternalSubsts, SubstsRef, Subst};
 use crate::ty::ReprOptions;
@@ -1123,6 +1123,13 @@ impl<'tcx> TyCtxt<'tcx> {
     pub fn alloc_steal_promoted(self, promoted: IndexVec<Promoted, Body<'tcx>>) ->
         &'tcx Steal<IndexVec<Promoted, Body<'tcx>>> {
         self.arena.alloc(Steal::new(promoted))
+    }
+
+    pub fn alloc_steal_local_info(
+        self,
+        local_info: mir::borrowck::ExtraLocalInfo<'tcx>,
+    ) -> &'tcx Steal<mir::borrowck::ExtraLocalInfo<'tcx>> {
+        self.arena.alloc(Steal::new(local_info))
     }
 
     pub fn intern_promoted(self, promoted: IndexVec<Promoted, Body<'tcx>>) ->

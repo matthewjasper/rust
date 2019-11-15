@@ -432,7 +432,6 @@ fn replace_result_variable<'tcx>(
         visibility_scope: source_info.scope,
         internal: false,
         is_block_tail: None,
-        is_user_variable: None,
     };
     let new_ret_local = Local::new(body.local_decls.len());
     body.local_decls.push(new_ret);
@@ -967,7 +966,6 @@ fn create_generator_drop_shim<'tcx>(
         visibility_scope: source_info.scope,
         internal: false,
         is_block_tail: None,
-        is_user_variable: None,
     };
 
     make_generator_state_argument_indirect(tcx, def_id, &mut body);
@@ -985,7 +983,6 @@ fn create_generator_drop_shim<'tcx>(
         visibility_scope: source_info.scope,
         internal: false,
         is_block_tail: None,
-        is_user_variable: None,
     };
     if tcx.sess.opts.debugging_opts.mir_emit_retag {
         // Alias tracking must know we changed the type

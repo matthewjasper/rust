@@ -13,6 +13,7 @@ use rustc::hir::def_id::DefId;
 use rustc::infer::InferCtxt;
 use rustc::mir::{ClosureOutlivesSubject, ClosureRegionRequirements,
                  Local, Location, Body, LocalKind, BasicBlock, Promoted};
+use rustc::mir::borrowck::ExtraLocalInfo;
 use rustc::ty::{self, RegionKind, RegionVid};
 use rustc_index::vec::IndexVec;
 use rustc_errors::Diagnostic;
@@ -158,6 +159,7 @@ pub(in crate::borrow_check) fn compute_regions<'cx, 'tcx>(
     universal_regions: UniversalRegions<'tcx>,
     body: &Body<'tcx>,
     promoted: &IndexVec<Promoted, Body<'tcx>>,
+    extra_local_info: &ExtraLocalInfo<'tcx>,
     upvars: &[Upvar],
     location_table: &LocationTable,
     param_env: ty::ParamEnv<'tcx>,
@@ -189,6 +191,7 @@ pub(in crate::borrow_check) fn compute_regions<'cx, 'tcx>(
         param_env,
         body,
         promoted,
+        extra_local_info,
         def_id,
         &universal_regions,
         location_table,

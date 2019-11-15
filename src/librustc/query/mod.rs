@@ -100,7 +100,9 @@ rustc_queries! {
 
         /// Fetch the MIR for a given `DefId` right after it's built - this includes
         /// unreachable code.
-        query mir_built(_: DefId) -> &'tcx Steal<mir::Body<'tcx>> {}
+        query mir_built(
+            _: DefId
+        ) -> (&'tcx Steal<mir::Body<'tcx>>, &'tcx Steal<mir::borrowck::ExtraLocalInfo<'tcx>>) {}
 
         /// Fetch the MIR for a given `DefId` up till the point where it is
         /// ready for const evaluation.

@@ -1,4 +1,5 @@
 use rustc::mir::*;
+use rustc::mir::borrowck::LocalInfo;
 use rustc::ty;
 use rustc_errors::{DiagnosticBuilder,Applicability};
 use syntax_pos::Span;
@@ -96,20 +97,18 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
                     .map(|stmt| &stmt.kind)
                 {
                     if let Some(local) = place.as_local() {
-                        let local_decl = &self.body.local_decls[local];
                         // opt_match_place is the
                         // match_span is the span of the expression being matched on
                         // match *x.y { ... }        match_place is Some(*x.y)
                         //       ^^^^                match_span is the span of *x.y
                         //
                         // opt_match_place is None for let [mut] x = ... statements,
-                        // whether or not the right-hand side is a place expression
-                        if let Some(ClearCrossCrate::Set(BindingForm::Var(VarBindingForm {
+                        // whether or not the right-hand side is a place expression.
+                        if let LocalInfo::Local {
                             opt_match_place: Some((ref opt_match_place, match_span)),
-                            binding_mode: _,
-                            opt_ty_info: _,
-                            pat_span: _,
-                        }))) = local_decl.is_user_variable
+                            ..
+                        }
+                            = self.extra_local_info[local]
                         {
                             let stmt_source_info = self.body.source_info(location);
                             self.append_binding_error(
@@ -317,11 +316,11 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
             base: PlaceBase::Local(local),
             projection: [],
         } = deref_base {
-            let decl = &self.body.local_decls[*local];
-            if decl.is_ref_for_guard() {
+            if self.extra_local_info[*local].is_ref_for_guard() {
+                let name = self.body.local_decls[*local].name.unwrap();
                 let mut err = self.cannot_move_out_of(
                     span,
-                    &format!("`{}` in pattern guard", decl.name.unwrap()),
+                    &format!("`{}` in pattern guard", name),
                 );
                 err.note(
                     "variables bound in patterns cannot be moved from \
@@ -507,13 +506,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
     ) {
         let mut suggestions: Vec<(Span, &str, String)> = Vec::new();
         for local in binds_to {
-            let bind_to = &self.body.local_decls[*local];
-            if let Some(
-                ClearCrossCrate::Set(BindingForm::Var(VarBindingForm {
-                    pat_span,
-                    ..
-                }))
-            ) = bind_to.is_user_variable {
+            if let LocalInfo::Local { pat_span, .. } = self.extra_local_info[*local] {
                 if let Ok(pat_snippet) = self.infcx.tcx.sess.source_map().span_to_snippet(pat_span)
                 {
                     if pat_snippet.starts_with('&') {

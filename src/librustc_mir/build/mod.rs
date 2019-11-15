@@ -5,11 +5,12 @@ use crate::hair::{LintLevel, BindingMode, PatKind};
 use crate::transform::MirSource;
 use crate::util as mir_util;
 use rustc::hir;
-use rustc::hir::Node;
+use rustc::hir::{ImplicitSelfKind, Node};
 use rustc::hir::def_id::DefId;
 use rustc::middle::lang_items;
 use rustc::middle::region;
 use rustc::mir::*;
+use rustc::mir::borrowck::ExtraLocalInfo;
 use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::subst::Subst;
 use rustc::util::nodemap::HirIdMap;
@@ -24,7 +25,7 @@ use syntax_pos::Span;
 use super::lints;
 
 /// Construct the MIR for a given `DefId`.
-pub fn mir_build(tcx: TyCtxt<'_>, def_id: DefId) -> Body<'_> {
+pub fn mir_build(tcx: TyCtxt<'_>, def_id: DefId) -> (Body<'_>, borrowck::ExtraLocalInfo<'_>) {
     let id = tcx.hir().as_local_hir_id(def_id).unwrap();
 
     // Figure out what primary body this item has.
@@ -182,9 +183,9 @@ pub fn mir_build(tcx: TyCtxt<'_>, def_id: DefId) -> Body<'_> {
         };
 
         mir_util::dump_mir(tcx, None, "mir_map", &0,
-                           MirSource::item(def_id), &body, |_, _| Ok(()) );
+                           MirSource::item(def_id), &body.0, |_, _| Ok(()) );
 
-        lints::check(tcx, &body, def_id);
+        lints::check(tcx, &body.0, def_id);
 
         body
     })
@@ -311,6 +312,7 @@ struct Builder<'a, 'tcx> {
     /// (A match binding can have two locals; the 2nd is for the arm's guard.)
     var_indices: HirIdMap<LocalsForNode>,
     local_decls: IndexVec<Local, LocalDecl<'tcx>>,
+    extra_local_info: ExtraLocalInfo<'tcx>,
     canonical_user_type_annotations: ty::CanonicalUserTypeAnnotations<'tcx>,
     __upvar_debuginfo_codegen_only_do_not_use: Vec<UpvarDebuginfo>,
     upvar_mutbls: Vec<Mutability>,
@@ -542,7 +544,7 @@ fn construct_fn<'a, 'tcx, A>(
     yield_ty: Option<Ty<'tcx>>,
     return_ty_span: Span,
     body: &'tcx hir::Body,
-) -> Body<'tcx>
+) -> (Body<'tcx>, borrowck::ExtraLocalInfo<'tcx>)
 where
     A: Iterator<Item=ArgInfo<'tcx>>
 {
@@ -661,7 +663,7 @@ where
           tcx.get_attrs(fn_def_id));
 
     let mut body = builder.finish(yield_ty);
-    body.spread_arg = spread_arg;
+    body.0.spread_arg = spread_arg;
     body
 }
 
@@ -670,7 +672,7 @@ fn construct_const<'a, 'tcx>(
     body_id: hir::BodyId,
     const_ty: Ty<'tcx>,
     const_ty_span: Span,
-) -> Body<'tcx> {
+) -> (Body<'tcx>, borrowck::ExtraLocalInfo<'tcx>) {
     let tcx = hir.tcx();
     let owner_id = tcx.hir().body_owner(body_id);
     let span = tcx.hir().span(owner_id);
@@ -710,7 +712,7 @@ fn construct_const<'a, 'tcx>(
 fn construct_error<'a, 'tcx>(
     hir: Cx<'a, 'tcx>,
     body_id: hir::BodyId
-) -> Body<'tcx> {
+) -> (Body<'tcx>, borrowck::ExtraLocalInfo<'tcx>) {
     let owner_id = hir.tcx().hir().body_owner(body_id);
     let span = hir.tcx().hir().span(owner_id);
     let ty = hir.tcx().types.err;
@@ -750,6 +752,10 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 LocalDecl::new_return_place(return_ty, return_span),
                 1,
             ),
+            extra_local_info: IndexVec::from_elem_n(
+                borrowck::LocalInfo::Other,
+                1,
+            ),
             canonical_user_type_annotations: IndexVec::new(),
             __upvar_debuginfo_codegen_only_do_not_use,
             upvar_mutbls,
@@ -771,24 +777,32 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
 
     fn finish(self,
               yield_ty: Option<Ty<'tcx>>)
-              -> Body<'tcx> {
+              -> (Body<'tcx>, ExtraLocalInfo<'tcx>) {
         for (index, block) in self.cfg.basic_blocks.iter().enumerate() {
             if block.terminator.is_none() {
                 span_bug!(self.fn_span, "no terminator on block {:?}", index);
             }
         }
+        assert_eq!(
+            self.local_decls.len(),
+            self.extra_local_info.len(),
+            "Different numbers of `LocalDecls` and `LocalInfo`s"
+        );
 
-        Body::new(
-            self.cfg.basic_blocks,
-            self.source_scopes,
-            ClearCrossCrate::Set(self.source_scope_local_data),
-            yield_ty,
-            self.local_decls,
-            self.canonical_user_type_annotations,
-            self.arg_count,
-            self.__upvar_debuginfo_codegen_only_do_not_use,
-            self.fn_span,
-            self.hir.control_flow_destroyed(),
+        (
+            Body::new(
+                self.cfg.basic_blocks,
+                self.source_scopes,
+                ClearCrossCrate::Set(self.source_scope_local_data),
+                yield_ty,
+                self.local_decls,
+                self.canonical_user_type_annotations,
+                self.arg_count,
+                self.__upvar_debuginfo_codegen_only_do_not_use,
+                self.fn_span,
+                self.hir.control_flow_destroyed(),
+            ),
+            self.extra_local_info,
         )
     }
 
@@ -820,9 +834,9 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 visibility_scope: source_info.scope,
                 name,
                 internal: false,
-                is_user_variable: None,
                 is_block_tail: None,
             });
+            self.extra_local_info.push(borrowck::LocalInfo::Other);
         }
 
         let mut scope = None;
@@ -855,18 +869,19 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     } => {
                         self.local_decls[local].mutability = mutability;
                         self.local_decls[local].source_info.scope = self.source_scope;
-                        self.local_decls[local].is_user_variable =
-                            if let Some(kind) = self_binding {
-                                Some(ClearCrossCrate::Set(BindingForm::ImplicitSelf(*kind)))
-                            } else {
-                                let binding_mode = ty::BindingMode::BindByValue(mutability.into());
-                                Some(ClearCrossCrate::Set(BindingForm::Var(VarBindingForm {
-                                    binding_mode,
-                                    opt_ty_info,
-                                    opt_match_place: Some((Some(place.clone()), span)),
-                                    pat_span: span,
-                                })))
+                        if let Some(kind) = *self_binding {
+                            self.extra_local_info[local] = borrowck::LocalInfo::ImplicitSelf {
+                                kind
                             };
+                        } else {
+                            self.extra_local_info[local] = borrowck::LocalInfo::Local {
+                                binding_mode: ty::BindByValue(mutability.into()),
+                                opt_ty_info,
+                                opt_match_place: Some((Some(place.clone()), span)),
+                                pat_span: span,
+                                ref_for_guard: false,
+                            };
+                        };
                         self.var_indices.insert(var, LocalsForNode::One(local));
                     }
                     _ => {
