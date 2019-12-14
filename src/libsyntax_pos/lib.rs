@@ -407,7 +407,7 @@ impl Span {
     pub fn allows_unstable(&self, feature: Symbol) -> bool {
         self.ctxt().outer_expn_data().allow_internal_unstable.map_or(false, |features| {
             features.iter().any(|&f| {
-                f == feature || f == sym::allow_internal_unstable_backcompat_hack
+                f == feature
             })
         })
     }
