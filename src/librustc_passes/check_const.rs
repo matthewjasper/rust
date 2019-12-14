@@ -39,13 +39,13 @@ impl NonConstExpr {
 
     /// Returns `true` if all feature gates required to enable this expression are turned on, or
     /// `None` if there is no feature gate corresponding to this expression.
-    fn is_feature_gate_enabled(self, features: &Features) -> Option<bool> {
+    fn is_feature_gate_enabled(self, features: &Features, span: Span) -> Option<bool> {
         use hir::MatchSource::*;
         match self {
             | Self::Match(Normal)
             | Self::Match(IfDesugar { .. })
             | Self::Match(IfLetDesugar { .. })
-            => Some(features.const_if_match),
+            => Some(features.const_if_match || span.allows_unstable(sym::const_if_match)),
 
             _ => None,
         }
@@ -120,7 +120,7 @@ impl<'tcx> CheckConstVisitor<'tcx> {
 
     /// Emits an error when an unsupported expression is found in a const context.
     fn const_check_violated(&self, expr: NonConstExpr, span: Span) {
-        match expr.is_feature_gate_enabled(self.tcx.features()) {
+        match expr.is_feature_gate_enabled(self.tcx.features(), span) {
             // Don't emit an error if the user has enabled the requisite feature gates.
             Some(true) => return,
 

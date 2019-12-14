@@ -1,0 +1,19 @@
+error[E0723]: loops and conditional expressions are not stable in const fn
+  --> $DIR/allow_internal_unstable.rs:10:13
+   |
+LL | /             if x {
+LL | |                 43
+LL | |             } else {
+LL | |                 2765
+LL | |             }
+   | |_____________^
+...
+LL |   make_fn!();
+   |   ----------- in this macro invocation
+   |
+   = note: for more information, see issue https://github.com/rust-lang/rust/issues/57563
+   = help: add `#![feature(const_fn)]` to the crate attributes to enable
+
+error: aborting due to previous error
+
+For more information about this error, try `rustc --explain E0723`.

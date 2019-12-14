@@ -67,6 +67,13 @@ pub fn is_min_const_fn(tcx: TyCtxt<'tcx>, def_id: DefId, body: &'a Body<'tcx>) -
         def_id,
     )?;
 
+    if feature_allowed(tcx, def_id, sym::const_fn) && !tcx.features().staged_api {
+        // Allow bypassing the min-const fn checks on the function body with
+        // `#[allow_internal_unstable(const_fn)]`. This is disabled on staged
+        // API crates because it can hide arbitrary unstable const features.
+        return Ok(());
+    }
+
     for bb in body.basic_blocks() {
         check_terminator(tcx, body, def_id, bb.terminator())?;
         for stmt in &bb.statements {
