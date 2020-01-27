@@ -536,8 +536,9 @@ fn visit_expr<'tcx>(ir: &mut IrMaps<'tcx>, expr: &'tcx Expr<'tcx>) {
         | hir::ExprKind::Box(..)
         | hir::ExprKind::Yield(..)
         | hir::ExprKind::Type(..)
-        | hir::ExprKind::Err
-        | hir::ExprKind::Path(hir::QPath::TypeRelative(..)) => {
+        | hir::ExprKind::Path(hir::QPath::TypeRelative(..))
+        | hir::ExprKind::Path(hir::QPath::LangItem(..))
+        | hir::ExprKind::Err => {
             intravisit::walk_expr(ir, expr);
         }
     }
@@ -1186,6 +1187,7 @@ impl<'a, 'tcx> Liveness<'a, 'tcx> {
 
             hir::ExprKind::Lit(..)
             | hir::ExprKind::Err
+            | hir::ExprKind::Path(hir::QPath::LangItem(..))
             | hir::ExprKind::Path(hir::QPath::TypeRelative(..)) => succ,
 
             // Note that labels have been resolved, so we don't need to look

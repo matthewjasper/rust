@@ -1562,6 +1562,11 @@ impl<'a> State<'a> {
                     colons_before_params,
                 )
             }
+            hir::QPath::LangItem(lang_item, _) => {
+                self.s.word("(#[lang = \"");
+                self.s.word(lang_item.name());
+                self.s.word("\"])");
+            }
         }
     }
 
@@ -1973,6 +1978,12 @@ impl<'a> State<'a> {
                         self.s.word("?");
                     }
                     self.print_poly_trait_ref(tref);
+                }
+                GenericBound::LangItemTrait { lang_item, args, .. } => {
+                    self.s.word("(#[lang = \"");
+                    self.s.word(lang_item.name());
+                    self.s.word("\"])");
+                    self.print_generic_args(args, false, true);
                 }
                 GenericBound::Outlives(lt) => {
                     self.print_lifetime(lt);

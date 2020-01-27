@@ -247,10 +247,12 @@ use crate::ops::{self, Deref, DerefMut};
 pub enum Result<T, E> {
     /// Contains the success value
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[cfg_attr(not(bootstrap), lang = "result_ok")]
     Ok(#[stable(feature = "rust1", since = "1.0.0")] T),
 
     /// Contains the error value
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[cfg_attr(not(bootstrap), lang = "result_err")]
     Err(#[stable(feature = "rust1", since = "1.0.0")] E),
 }
 

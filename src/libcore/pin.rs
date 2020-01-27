@@ -562,6 +562,7 @@ impl<P: Deref> Pin<P> {
     /// [`mem::swap`]: ../../std/mem/fn.swap.html
     #[stable(feature = "pin", since = "1.33.0")]
     #[inline(always)]
+    #[cfg_attr(not(bootstrap), lang = "pin_new_unchecked")]
     pub unsafe fn new_unchecked(pointer: P) -> Pin<P> {
         Pin { pointer }
     }

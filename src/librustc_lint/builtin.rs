@@ -1077,6 +1077,7 @@ impl TypeAliasBounds {
                 }
             }
             hir::QPath::Resolved(..) => false,
+            hir::QPath::LangItem(..) => false,
         }
     }
 

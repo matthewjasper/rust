@@ -1312,6 +1312,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypePrivacyVisitor<'a, 'tcx> {
                 let name = match *qpath {
                     hir::QPath::Resolved(_, ref path) => path.to_string(),
                     hir::QPath::TypeRelative(_, ref segment) => segment.ident.to_string(),
+                    hir::QPath::LangItem(li, _) => li.name().to_string(),
                 };
                 let msg = format!("{} `{}` is private", kind.descr(def_id), name);
                 self.tcx.sess.span_err(span, &msg);

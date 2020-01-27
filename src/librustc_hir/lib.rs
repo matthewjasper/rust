@@ -17,6 +17,7 @@ mod hir;
 pub mod hir_id;
 pub mod intravisit;
 pub mod itemlikevisit;
+pub mod lang_item;
 pub mod pat_util;
 pub mod print;
 mod stable_hash_impls;

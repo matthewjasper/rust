@@ -11,6 +11,7 @@ use crate::result::Result;
 pub enum Poll<T> {
     /// Represents that a value is immediately ready.
     #[stable(feature = "futures_api", since = "1.36.0")]
+    #[cfg_attr(not(bootstrap), lang = "poll_ready")]
     Ready(#[stable(feature = "futures_api", since = "1.36.0")] T),
 
     /// Represents that a value is not ready yet.
@@ -19,6 +20,7 @@ pub enum Poll<T> {
     /// ensure that the current task is scheduled to be awoken when
     /// progress can be made.
     #[stable(feature = "futures_api", since = "1.36.0")]
+    #[cfg_attr(not(bootstrap), lang = "poll_pending")]
     Pending,
 }
 

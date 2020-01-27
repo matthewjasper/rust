@@ -40,12 +40,12 @@ use rustc::hir::map::Map;
 use rustc::{bug, span_bug};
 use rustc_data_structures::captures::Captures;
 use rustc_data_structures::fx::FxHashSet;
-use rustc_data_structures::sync::Lrc;
 use rustc_errors::struct_span_err;
 use rustc_hir as hir;
 use rustc_hir::def::{DefKind, Namespace, PartialRes, PerNS, Res};
 use rustc_hir::def_id::{DefId, DefIdMap, DefIndex, CRATE_DEF_INDEX};
 use rustc_hir::intravisit;
+use rustc_hir::lang_item::LangItem;
 use rustc_hir::{ConstArg, GenericArg, ParamName};
 use rustc_index::vec::IndexVec;
 use rustc_session::config::nightly_options;
@@ -54,7 +54,7 @@ use rustc_session::node_id::NodeMap;
 use rustc_session::Session;
 use rustc_span::hygiene::ExpnId;
 use rustc_span::source_map::{respan, DesugaringKind, ExpnData, ExpnKind};
-use rustc_span::symbol::{kw, sym, Symbol};
+use rustc_span::symbol::{kw, sym};
 use rustc_span::Span;
 use syntax::ast;
 use syntax::ast::*;
@@ -86,8 +86,6 @@ mod path;
 const HIR_ID_COUNTER_LOCKED: u32 = 0xFFFFFFFF;
 
 struct LoweringContext<'a, 'hir: 'a> {
-    crate_root: Option<Symbol>,
-
     /// Used to assign IDs to HIR nodes that do not directly correspond to AST nodes.
     sess: &'a Session,
 
@@ -163,9 +161,6 @@ struct LoweringContext<'a, 'hir: 'a> {
     current_hir_id_owner: Vec<(DefIndex, u32)>,
     item_local_id_counters: NodeMap<u32>,
     node_id_to_hir_id: IndexVec<NodeId, hir::HirId>,
-
-    allow_try_trait: Option<Lrc<[Symbol]>>,
-    allow_gen_future: Option<Lrc<[Symbol]>>,
 }
 
 pub trait Resolver {
@@ -185,16 +180,6 @@ pub trait Resolver {
     /// We must keep the set of definitions up to date as we add nodes that weren't in the AST.
     /// This should only return `None` during testing.
     fn definitions(&mut self) -> &mut Definitions;
-
-    /// Given suffix `["b", "c", "d"]`, creates an AST path for `[::crate_root]::b::c::d` and
-    /// resolves it based on `is_value`.
-    fn resolve_str_path(
-        &mut self,
-        span: Span,
-        crate_root: Option<Symbol>,
-        components: &[Symbol],
-        ns: Namespace,
-    ) -> (ast::Path, Res<NodeId>);
 
     fn lint_buffer(&mut self) -> &mut LintBuffer;
 
@@ -269,7 +254,6 @@ pub fn lower_crate<'a, 'hir>(
     let _prof_timer = sess.prof.verbose_generic_activity("hir_lowering");
 
     LoweringContext {
-        crate_root: sess.parse_sess.injected_crate_name.try_get().copied(),
         sess,
         resolver,
         nt_to_tokenstream,
@@ -298,8 +282,6 @@ pub fn lower_crate<'a, 'hir>(
         lifetimes_to_define: Vec::new(),
         is_collecting_in_band_lifetimes: false,
         in_scope_lifetimes: Vec::new(),
-        allow_try_trait: Some([sym::try_trait][..].into()),
-        allow_gen_future: Some([sym::gen_future][..].into()),
     }
     .lower_crate(krate)
 }
@@ -693,16 +675,12 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
 
     /// Reuses the span but adds information like the kind of the desugaring and features that are
     /// allowed inside this span.
-    fn mark_span_with_reason(
-        &self,
-        reason: DesugaringKind,
-        span: Span,
-        allow_internal_unstable: Option<Lrc<[Symbol]>>,
-    ) -> Span {
-        span.fresh_expansion(ExpnData {
-            allow_internal_unstable,
-            ..ExpnData::default(ExpnKind::Desugaring(reason), span, self.sess.edition())
-        })
+    fn mark_span_with_reason(&self, reason: DesugaringKind, span: Span) -> Span {
+        span.fresh_expansion(ExpnData::default(
+            ExpnKind::Desugaring(reason),
+            span,
+            self.sess.edition(),
+        ))
     }
 
     fn with_anonymous_lifetime_mode<R>(
@@ -1372,7 +1350,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         // desugaring that explicitly states that we don't want to track that.
         // Not tracking it makes lints in rustc and clippy very fragile, as
         // frequently opened issues show.
-        let opaque_ty_span = self.mark_span_with_reason(DesugaringKind::OpaqueTy, span, None);
+        let opaque_ty_span = self.mark_span_with_reason(DesugaringKind::OpaqueTy, span);
 
         let opaque_ty_def_index =
             self.resolver.definitions().opt_def_index(opaque_ty_node_id).unwrap();
@@ -1801,7 +1779,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
 
         let span = output.span();
 
-        let opaque_ty_span = self.mark_span_with_reason(DesugaringKind::Async, span, None);
+        let opaque_ty_span = self.mark_span_with_reason(DesugaringKind::Async, span);
 
         let opaque_ty_def_index =
             self.resolver.definitions().opt_def_index(opaque_ty_node_id).unwrap();
@@ -1972,24 +1950,19 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         };
 
         // "<Output = T>"
-        let future_params = self.arena.alloc(hir::GenericArgs {
+        let future_args = self.arena.alloc(hir::GenericArgs {
             args: &[],
             bindings: arena_vec![self; self.output_ty_binding(span, output_ty)],
             parenthesized: false,
         });
 
-        // ::std::future::Future<future_params>
-        let future_path =
-            self.std_path(span, &[sym::future, sym::Future], Some(future_params), false);
-
-        hir::GenericBound::Trait(
-            hir::PolyTraitRef {
-                trait_ref: hir::TraitRef { path: future_path, hir_ref_id: self.next_id() },
-                bound_generic_params: &[],
-                span,
-            },
-            hir::TraitBoundModifier::None,
-        )
+        // ::std::future::Future<future_args>
+        hir::GenericBound::LangItemTrait {
+            lang_item: LangItem::FutureTraitLangItem,
+            span,
+            hir_id: self.next_id(),
+            args: future_args,
+        }
     }
 
     fn lower_param_bound(
@@ -2361,34 +2334,47 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
     }
 
     fn pat_ok(&mut self, span: Span, pat: &'hir hir::Pat<'hir>) -> &'hir hir::Pat<'hir> {
-        self.pat_std_enum(span, &[sym::result, sym::Result, sym::Ok], arena_vec![self; pat])
+        let field = self.single_pat_field(span, pat);
+        self.pat_lang_item_variant(LangItem::ResultOk, span, field)
     }
 
     fn pat_err(&mut self, span: Span, pat: &'hir hir::Pat<'hir>) -> &'hir hir::Pat<'hir> {
-        self.pat_std_enum(span, &[sym::result, sym::Result, sym::Err], arena_vec![self; pat])
+        let field = self.single_pat_field(span, pat);
+        self.pat_lang_item_variant(LangItem::ResultErr, span, field)
     }
 
     fn pat_some(&mut self, span: Span, pat: &'hir hir::Pat<'hir>) -> &'hir hir::Pat<'hir> {
-        self.pat_std_enum(span, &[sym::option, sym::Option, sym::Some], arena_vec![self; pat])
+        let field = self.single_pat_field(span, pat);
+        self.pat_lang_item_variant(LangItem::OptionSome, span, field)
     }
 
     fn pat_none(&mut self, span: Span) -> &'hir hir::Pat<'hir> {
-        self.pat_std_enum(span, &[sym::option, sym::Option, sym::None], &[])
+        self.pat_lang_item_variant(LangItem::OptionNone, span, &[])
     }
 
-    fn pat_std_enum(
+    fn single_pat_field(
         &mut self,
         span: Span,
-        components: &[Symbol],
-        subpats: &'hir [&'hir hir::Pat<'hir>],
-    ) -> &'hir hir::Pat<'hir> {
-        let path = self.std_path(span, components, None, true);
-        let qpath = hir::QPath::Resolved(None, path);
-        let pt = if subpats.is_empty() {
-            hir::PatKind::Path(qpath)
-        } else {
-            hir::PatKind::TupleStruct(qpath, subpats, None)
+        pat: &'hir hir::Pat<'hir>,
+    ) -> &'hir [hir::FieldPat<'hir>] {
+        let field = hir::FieldPat {
+            hir_id: self.next_id(),
+            ident: Ident::new(sym::integer(0), span),
+            is_shorthand: false,
+            pat,
+            span,
         };
+        arena_vec![self; field]
+    }
+
+    fn pat_lang_item_variant(
+        &mut self,
+        lang_item: LangItem,
+        span: Span,
+        fields: &'hir [hir::FieldPat<'hir>],
+    ) -> &'hir hir::Pat<'hir> {
+        let qpath = hir::QPath::LangItem(lang_item, span);
+        let pt = hir::PatKind::Struct(qpath, fields, false);
         self.pat(span, pt)
     }
 
@@ -2420,42 +2406,6 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
 
     fn pat(&mut self, span: Span, kind: hir::PatKind<'hir>) -> &'hir hir::Pat<'hir> {
         self.arena.alloc(hir::Pat { hir_id: self.next_id(), kind, span })
-    }
-
-    /// Given a suffix `["b", "c", "d"]`, returns path `::std::b::c::d` when
-    /// `fld.cx.use_std`, and `::core::b::c::d` otherwise.
-    /// The path is also resolved according to `is_value`.
-    fn std_path(
-        &mut self,
-        span: Span,
-        components: &[Symbol],
-        params: Option<&'hir hir::GenericArgs<'hir>>,
-        is_value: bool,
-    ) -> &'hir hir::Path<'hir> {
-        let ns = if is_value { Namespace::ValueNS } else { Namespace::TypeNS };
-        let (path, res) = self.resolver.resolve_str_path(span, self.crate_root, components, ns);
-
-        let mut segments: Vec<_> = path
-            .segments
-            .iter()
-            .map(|segment| {
-                let res = self.expect_full_res(segment.id);
-                hir::PathSegment {
-                    ident: segment.ident,
-                    hir_id: Some(self.lower_node_id(segment.id)),
-                    res: Some(self.lower_res(res)),
-                    infer_args: true,
-                    args: None,
-                }
-            })
-            .collect();
-        segments.last_mut().unwrap().args = params;
-
-        self.arena.alloc(hir::Path {
-            span,
-            res: res.map_id(|_| panic!("unexpected `NodeId`")),
-            segments: self.arena.alloc_from_iter(segments),
-        })
     }
 
     fn ty_path(

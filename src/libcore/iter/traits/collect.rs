@@ -236,6 +236,7 @@ pub trait IntoIterator {
     /// assert_eq!(None, iter.next());
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[cfg_attr(not(bootstrap), lang = "into_iter")]
     fn into_iter(self) -> Self::IntoIter;
 }
 

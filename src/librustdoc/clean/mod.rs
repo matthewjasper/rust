@@ -1480,6 +1480,9 @@ impl Clean<Type> for hir::Ty<'_> {
                     trait_: box resolve_type(cx, trait_path.clean(cx), self.hir_id),
                 }
             }
+            TyKind::Path(hir::QPath::LangItem(..)) => {
+                panic!("Shouldn't have to document lang items")
+            }
             TyKind::TraitObject(ref bounds, ref lifetime) => {
                 match bounds[0].clean(cx).trait_ {
                     ResolvedPath { path, param_names: None, did, is_generic } => {
@@ -1975,6 +1978,61 @@ impl Clean<GenericArgs> for hir::GenericArgs<'_> {
 impl Clean<PathSegment> for hir::PathSegment<'_> {
     fn clean(&self, cx: &DocContext<'_>) -> PathSegment {
         PathSegment { name: self.ident.name.clean(cx), args: self.generic_args().clean(cx) }
+    }
+}
+
+fn strip_type(ty: Type) -> Type {
+    match ty {
+        Type::ResolvedPath { path, param_names, did, is_generic } => {
+            Type::ResolvedPath { path: strip_path(&path), param_names, did, is_generic }
+        }
+        Type::Tuple(inner_tys) => {
+            Type::Tuple(inner_tys.iter().map(|t| strip_type(t.clone())).collect())
+        }
+        Type::Slice(inner_ty) => Type::Slice(Box::new(strip_type(*inner_ty))),
+        Type::Array(inner_ty, s) => Type::Array(Box::new(strip_type(*inner_ty)), s),
+        Type::Unique(inner_ty) => Type::Unique(Box::new(strip_type(*inner_ty))),
+        Type::RawPointer(m, inner_ty) => Type::RawPointer(m, Box::new(strip_type(*inner_ty))),
+        Type::BorrowedRef { lifetime, mutability, type_ } => {
+            Type::BorrowedRef { lifetime, mutability, type_: Box::new(strip_type(*type_)) }
+        }
+        Type::QPath { name, self_type, trait_ } => Type::QPath {
+            name,
+            self_type: Box::new(strip_type(*self_type)),
+            trait_: Box::new(strip_type(*trait_)),
+        },
+        _ => ty,
+    }
+}
+
+fn strip_path(path: &Path) -> Path {
+    let segments = path
+        .segments
+        .iter()
+        .map(|s| PathSegment {
+            name: s.name.clone(),
+            args: GenericArgs::AngleBracketed { args: vec![], bindings: vec![] },
+        })
+        .collect();
+
+    Path { global: path.global, res: path.res.clone(), segments }
+}
+
+fn qpath_to_string(p: &hir::QPath) -> String {
+    let segments = match *p {
+        hir::QPath::Resolved(_, ref path) => &path.segments,
+        hir::QPath::TypeRelative(_, ref segment) => return segment.ident.to_string(),
+        hir::QPath::LangItem(li, _) => return li.name().to_string(),
+    };
+
+    let mut s = String::new();
+    for (i, seg) in segments.iter().enumerate() {
+        if i > 0 {
+            s.push_str("::");
+        }
+        if seg.ident.name != keywords::PathRoot.name() {
+            s.push_str(&*seg.ident.as_str());
+        }
     }
 }
 

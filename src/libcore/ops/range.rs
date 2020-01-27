@@ -41,6 +41,7 @@ use crate::hash::{Hash, Hasher};
 #[doc(alias = "..")]
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 #[stable(feature = "rust1", since = "1.0.0")]
+#[cfg_attr(not(bootstrap), lang = "range_full")]
 pub struct RangeFull;
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -73,6 +74,7 @@ impl fmt::Debug for RangeFull {
 #[doc(alias = "..")]
 #[derive(Clone, PartialEq, Eq, Hash)] // not Copy -- see #27186
 #[stable(feature = "rust1", since = "1.0.0")]
+#[cfg_attr(not(bootstrap), lang = "range")]
 pub struct Range<Idx> {
     /// The lower bound of the range (inclusive).
     #[stable(feature = "rust1", since = "1.0.0")]
@@ -178,6 +180,7 @@ impl<Idx: PartialOrd<Idx>> Range<Idx> {
 #[doc(alias = "..")]
 #[derive(Clone, PartialEq, Eq, Hash)] // not Copy -- see #27186
 #[stable(feature = "rust1", since = "1.0.0")]
+#[cfg_attr(not(bootstrap), lang = "range_from")]
 pub struct RangeFrom<Idx> {
     /// The lower bound of the range (inclusive).
     #[stable(feature = "rust1", since = "1.0.0")]
@@ -262,6 +265,7 @@ impl<Idx: PartialOrd<Idx>> RangeFrom<Idx> {
 #[doc(alias = "..")]
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 #[stable(feature = "rust1", since = "1.0.0")]
+#[cfg_attr(not(bootstrap), lang = "range_to")]
 pub struct RangeTo<Idx> {
     /// The upper bound of the range (exclusive).
     #[stable(feature = "rust1", since = "1.0.0")]
@@ -404,6 +408,7 @@ impl<Idx> RangeInclusive<Idx> {
     #[inline]
     #[rustc_promotable]
     #[rustc_const_stable(feature = "const_range_new", since = "1.32.0")]
+    #[cfg_attr(not(bootstrap), lang = "range_inclusive")]
     pub const fn new(start: Idx, end: Idx) -> Self {
         Self { start, end, is_empty: None }
     }
@@ -607,6 +612,7 @@ impl<Idx: PartialOrd<Idx>> RangeInclusive<Idx> {
 #[doc(alias = "..=")]
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 #[stable(feature = "inclusive_range", since = "1.26.0")]
+#[cfg_attr(not(bootstrap), lang = "range_to_inclusive")]
 pub struct RangeToInclusive<Idx> {
     /// The upper bound of the range (inclusive)
     #[stable(feature = "inclusive_range", since = "1.26.0")]

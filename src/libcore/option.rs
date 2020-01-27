@@ -156,9 +156,11 @@ use crate::{
 pub enum Option<T> {
     /// No value
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[cfg_attr(not(bootstrap), lang = "option_none")]
     None,
     /// Some value `T`
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[cfg_attr(not(bootstrap), lang = "option_some")]
     Some(#[stable(feature = "rust1", since = "1.0.0")] T),
 }
 

@@ -1913,7 +1913,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         obligation: &TraitObligation<'tcx>,
         candidates: &mut SelectionCandidateSet<'tcx>,
     ) -> Result<(), SelectionError<'tcx>> {
-        let kind = match self.tcx().lang_items().fn_trait_kind(obligation.predicate.def_id()) {
+        let kind = match self.tcx().fn_trait_kind(obligation.predicate.def_id()) {
             Some(k) => k,
             None => {
                 return Ok(());
@@ -1956,7 +1956,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         candidates: &mut SelectionCandidateSet<'tcx>,
     ) -> Result<(), SelectionError<'tcx>> {
         // We provide impl of all fn traits for fn pointers.
-        if self.tcx().lang_items().fn_trait_kind(obligation.predicate.def_id()).is_none() {
+        if self.tcx().fn_trait_kind(obligation.predicate.def_id()).is_none() {
             return Ok(());
         }
 
@@ -3170,7 +3170,6 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
         let kind = self
             .tcx()
-            .lang_items()
             .fn_trait_kind(obligation.predicate.def_id())
             .unwrap_or_else(|| bug!("closure candidate for non-fn trait {:?}", obligation));
 

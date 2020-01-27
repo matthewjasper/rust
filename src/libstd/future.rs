@@ -18,6 +18,7 @@ pub use core::future::*;
 /// better error messages (`impl Future` rather than `GenFuture<[closure.....]>`).
 #[doc(hidden)]
 #[unstable(feature = "gen_future", issue = "50547")]
+#[cfg_attr(not(bootstrap), lang = "from_generator")]
 pub fn from_generator<T: Generator<Yield = ()>>(x: T) -> impl Future<Output = T::Return> {
     GenFuture(x)
 }
@@ -72,6 +73,7 @@ unsafe fn set_task_context(cx: &mut Context<'_>) -> SetOnDrop {
 
 #[doc(hidden)]
 #[unstable(feature = "gen_future", issue = "50547")]
+#[cfg_attr(not(bootstrap), lang = "poll_with_context")]
 /// Polls a future in the current thread-local task waker.
 pub fn poll_with_tls_context<F>(f: Pin<&mut F>) -> Poll<F::Output>
 where

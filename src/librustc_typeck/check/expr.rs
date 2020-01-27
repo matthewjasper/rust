@@ -31,6 +31,7 @@ use rustc_errors::{pluralize, struct_span_err, Applicability, DiagnosticBuilder,
 use rustc_hir as hir;
 use rustc_hir::def::{CtorKind, DefKind, Res};
 use rustc_hir::def_id::DefId;
+use rustc_hir::lang_item::LangItem;
 use rustc_hir::{ExprKind, QPath};
 use rustc_span::hygiene::DesugaringKind;
 use rustc_span::source_map::Span;
@@ -228,6 +229,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             }
             ExprKind::AddrOf(kind, mutbl, ref oprnd) => {
                 self.check_expr_addr_of(kind, mutbl, oprnd, expected, expr)
+            }
+            ExprKind::Path(QPath::LangItem(lang_item, _)) => {
+                self.check_lang_item_path(lang_item, expr)
             }
             ExprKind::Path(ref qpath) => self.check_expr_path(qpath, expr),
             ExprKind::InlineAsm(ref asm) => {
@@ -464,6 +468,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             .span_label(oprnd.span, "temporary value")
             .emit();
         }
+    }
+
+    fn check_lang_item_path(&self, lang_item: LangItem, expr: &'tcx hir::Expr<'tcx>) -> Ty<'tcx> {
+        self.resolve_lang_item_path(lang_item, expr.span, expr.hir_id).1
     }
 
     fn check_expr_path(&self, qpath: &hir::QPath<'_>, expr: &'tcx hir::Expr<'tcx>) -> Ty<'tcx> {
@@ -1100,6 +1108,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let path_span = match *qpath {
             QPath::Resolved(_, ref path) => path.span,
             QPath::TypeRelative(ref qself, _) => qself.span,
+            QPath::LangItem(_, span) => span,
         };
 
         // Prohibit struct expressions when non-exhaustive flag is set.
