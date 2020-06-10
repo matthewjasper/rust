@@ -527,14 +527,37 @@ impl<'a, 'tcx> TyDecoder<'tcx> for CacheDecoder<'a, 'tcx> {
         let cache_key =
             ty::CReaderCacheKey { cnum: CrateNum::ReservedForIncrCompCache, pos: shorthand };
 
-        if let Some(&ty) = tcx.rcache.borrow().get(&cache_key) {
+        if let Some(&ty) = tcx.ty_rcache.borrow().get(&cache_key) {
             return Ok(ty);
         }
 
         let ty = or_insert_with(self)?;
         // This may overwrite the entry, but it should overwrite with the same value.
-        tcx.rcache.borrow_mut().insert_same(cache_key, ty);
+        tcx.ty_rcache.borrow_mut().insert_same(cache_key, ty);
         Ok(ty)
+    }
+
+    fn cached_predicate_for_shorthand<F>(
+        &mut self,
+        shorthand: usize,
+        or_insert_with: F,
+    ) -> Result<ty::Predicate<'tcx>, Self::Error>
+    where
+        F: FnOnce(&mut Self) -> Result<ty::Predicate<'tcx>, Self::Error>,
+    {
+        let tcx = self.tcx();
+
+        let cache_key =
+            ty::CReaderCacheKey { cnum: CrateNum::ReservedForIncrCompCache, pos: shorthand };
+
+        if let Some(&pred) = tcx.pred_rcache.borrow().get(&cache_key) {
+            return Ok(pred);
+        }
+
+        let pred = or_insert_with(self)?;
+        // This may overwrite the entry, but it should overwrite with the same value.
+        tcx.pred_rcache.borrow_mut().insert_same(cache_key, pred);
+        Ok(pred)
     }
 
     fn with_position<F, R>(&mut self, pos: usize, f: F) -> R
@@ -838,17 +861,13 @@ where
     }
 }
 
-impl<'a, 'tcx, E> SpecializedEncoder<&'tcx [(ty::Predicate<'tcx>, Span)]>
-    for CacheEncoder<'a, 'tcx, E>
+impl<'a, 'tcx, E> SpecializedEncoder<ty::Predicate<'tcx>> for CacheEncoder<'a, 'tcx, E>
 where
     E: 'a + TyEncoder,
 {
     #[inline]
-    fn specialized_encode(
-        &mut self,
-        predicates: &&'tcx [(ty::Predicate<'tcx>, Span)],
-    ) -> Result<(), Self::Error> {
-        ty_codec::encode_spanned_predicates(self, predicates, |encoder| {
+    fn specialized_encode(&mut self, predicate: &ty::Predicate<'tcx>) -> Result<(), Self::Error> {
+        ty_codec::encode_with_shorthand(self, predicate, |encoder| {
             &mut encoder.predicate_shorthands
         })
     }

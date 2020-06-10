@@ -234,6 +234,12 @@ impl<'tcx> SpecializedEncoder<Ty<'tcx>> for EncodeContext<'tcx> {
     }
 }
 
+impl<'tcx> SpecializedEncoder<ty::Predicate<'tcx>> for EncodeContext<'tcx> {
+    fn specialized_encode(&mut self, predicate: &ty::Predicate<'tcx>) -> Result<(), Self::Error> {
+        ty_codec::encode_with_shorthand(self, predicate, |ecx| &mut ecx.predicate_shorthands)
+    }
+}
+
 impl<'tcx> SpecializedEncoder<interpret::AllocId> for EncodeContext<'tcx> {
     fn specialized_encode(&mut self, alloc_id: &interpret::AllocId) -> Result<(), Self::Error> {
         use std::collections::hash_map::Entry;
@@ -248,15 +254,6 @@ impl<'tcx> SpecializedEncoder<interpret::AllocId> for EncodeContext<'tcx> {
         };
 
         index.encode(self)
-    }
-}
-
-impl<'tcx> SpecializedEncoder<&'tcx [(ty::Predicate<'tcx>, Span)]> for EncodeContext<'tcx> {
-    fn specialized_encode(
-        &mut self,
-        predicates: &&'tcx [(ty::Predicate<'tcx>, Span)],
-    ) -> Result<(), Self::Error> {
-        ty_codec::encode_spanned_predicates(self, predicates, |ecx| &mut ecx.predicate_shorthands)
     }
 }
 
