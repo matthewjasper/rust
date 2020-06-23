@@ -1061,7 +1061,7 @@ crate fn compare_ty_impl<'tcx>(
 
         compare_type_predicate_entailment(tcx, impl_ty, impl_ty_span, trait_ty, impl_trait_ref)?;
 
-        compare_projection_bounds(tcx, trait_ty, impl_ty, impl_ty_span, impl_trait_ref)
+        check_type_bounds(tcx, trait_ty, impl_ty, impl_ty_span, impl_trait_ref)
     })();
 }
 
@@ -1182,7 +1182,7 @@ fn compare_type_predicate_entailment<'tcx>(
 /// For default associated types the normalization is not possible (the value
 /// from the impl could be overridden). We also can't normalize generic
 /// associated types (yet) because they contain bound parameters.
-fn compare_projection_bounds<'tcx>(
+fn check_type_bounds<'tcx>(
     tcx: TyCtxt<'tcx>,
     trait_ty: &ty::AssocItem,
     impl_ty: &ty::AssocItem,
@@ -1241,9 +1241,9 @@ fn compare_projection_bounds<'tcx>(
             ObligationCauseCode::ItemObligation(trait_ty.def_id),
         );
 
-        let predicates = tcx.projection_predicates(trait_ty.def_id);
+        let predicates = tcx.item_bounds(trait_ty.def_id);
 
-        debug!("compare_projection_bounds: projection_predicates={:?}", predicates);
+        debug!("check_type_bounds: item_bounds={:?}", predicates);
 
         for predicate in predicates {
             let concrete_ty_predicate = match predicate.kind() {
