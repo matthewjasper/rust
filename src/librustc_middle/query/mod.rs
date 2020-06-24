@@ -146,8 +146,13 @@ rustc_queries! {
         ///      ^^^^^^^^^^^^^^^
         ///
         /// `key` is the `DefId` of the associated type or opaque type.
-        query item_bounds(key: DefId) -> &'tcx ty::List<ty::Predicate<'tcx>> {
+        query explicit_item_bounds(key: DefId) -> &'tcx [(ty::Predicate<'tcx>, Span)] {
             desc { |tcx| "finding projection predicates for `{}`", tcx.def_path_str(key) }
+        }
+
+        /// Elaborated the predicates from `explicit_item_bounds`.
+        query item_bounds(key: DefId) -> &'tcx ty::List<ty::Predicate<'tcx>> {
+            desc { |tcx| "elaborating projection predicates for `{}`", tcx.def_path_str(key) }
         }
 
         query native_libraries(_: CrateNum) -> Lrc<Vec<NativeLib>> {

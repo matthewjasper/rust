@@ -565,12 +565,12 @@ pub trait PrettyPrinter<'tcx>:
                     }
                     // Grab the "TraitA + TraitB" from `impl TraitA + TraitB`,
                     // by looking up the projections associated with the def_id.
-                    let bounds = self.tcx().predicates_of(def_id).instantiate(self.tcx(), substs);
+                    let bounds = self.tcx().item_bounds(def_id).subst(self.tcx(), substs);
 
                     let mut first = true;
                     let mut is_sized = false;
                     p!(write("impl"));
-                    for predicate in bounds.predicates {
+                    for predicate in bounds {
                         if let Some(trait_ref) = predicate.to_opt_poly_trait_ref() {
                             // Don't print +Sized, but rather +?Sized if absent.
                             if Some(trait_ref.def_id()) == self.tcx().lang_items().sized_trait() {
