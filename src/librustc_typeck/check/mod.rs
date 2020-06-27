@@ -1667,8 +1667,7 @@ fn check_opaque_for_inheriting_lifetimes(tcx: TyCtxt<'tcx>, def_id: LocalDefId, 
             ty: None,
         };
         let prohibit_opaque = tcx
-            .predicates_of(def_id)
-            .predicates
+            .explicit_item_bounds(def_id)
             .iter()
             .any(|(predicate, _)| predicate.visit_with(&mut visitor));
         debug!(
@@ -1942,9 +1941,26 @@ pub fn check_item_type<'tcx>(tcx: TyCtxt<'tcx>, it: &'tcx hir::Item<'tcx>) {
 
             for item in items.iter() {
                 let item = tcx.hir().trait_item(item.id);
-                if let hir::TraitItemKind::Fn(sig, _) = &item.kind {
-                    let abi = sig.header.abi;
-                    fn_maybe_err(tcx, item.ident.span, abi);
+                match item.kind {
+                    hir::TraitItemKind::Fn(ref sig, _) => {
+                        let abi = sig.header.abi;
+                        fn_maybe_err(tcx, item.ident.span, abi);
+                    }
+                    hir::TraitItemKind::Type(.., Some(_default)) => {
+                        let item_def_id = tcx.hir().local_def_id(item.hir_id).to_def_id();
+                        let assoc_item = tcx.associated_item(item_def_id);
+                        let trait_substs =
+                            InternalSubsts::identity_for_item(tcx, def_id.to_def_id());
+                        let _: Result<_, rustc_errors::ErrorReported> =
+                            compare_method::check_type_bounds(
+                                tcx,
+                                assoc_item,
+                                assoc_item,
+                                item.span,
+                                ty::TraitRef { def_id: def_id.to_def_id(), substs: trait_substs },
+                            );
+                    }
+                    _ => {}
                 }
             }
         }

@@ -196,11 +196,14 @@ where
                     // The intent is to treat `impl Trait1 + Trait2` identically to
                     // `dyn Trait1 + Trait2`. Therefore we ignore def-id of the opaque type itself
                     // (it either has no visibility, or its visibility is insignificant, like
-                    // visibilities of type aliases) and recurse into predicates instead to go
+                    // visibilities of type aliases) and recurse into bounds instead to go
                     // through the trait list (default type visitor doesn't visit those traits).
                     // All traits in the list are considered the "primary" part of the type
                     // and are visited by shallow visitors.
-                    if self.visit_predicates(tcx.predicates_of(def_id)) {
+                    if self.visit_predicates(ty::GenericPredicates {
+                        parent: None,
+                        predicates: tcx.explicit_item_bounds(def_id),
+                    }) {
                         return true;
                     }
                 }
@@ -1782,6 +1785,14 @@ impl SearchInterfaceForPrivateItemsVisitor<'tcx> {
         self
     }
 
+    fn bounds(&mut self) -> &mut Self {
+        self.visit_predicates(ty::GenericPredicates {
+            parent: None,
+            predicates: self.tcx.explicit_item_bounds(self.item_def_id),
+        });
+        self
+    }
+
     fn ty(&mut self) -> &mut Self {
         self.visit(self.tcx.type_of(self.item_def_id));
         self
@@ -1957,7 +1968,7 @@ impl<'a, 'tcx> Visitor<'tcx> for PrivateItemsInPublicInterfacesVisitor<'a, 'tcx>
             hir::ItemKind::OpaqueTy(..) => {
                 // `ty()` for opaque types is the underlying type,
                 // it's not a part of interface, so we skip it.
-                self.check(item.hir_id, item_visibility).generics().predicates();
+                self.check(item.hir_id, item_visibility).generics().bounds();
             }
             hir::ItemKind::Trait(.., trait_item_refs) => {
                 self.check(item.hir_id, item_visibility).generics().predicates();
@@ -1969,6 +1980,10 @@ impl<'a, 'tcx> Visitor<'tcx> for PrivateItemsInPublicInterfacesVisitor<'a, 'tcx>
                         trait_item_ref.defaultness,
                         item_visibility,
                     );
+
+                    if let AssocItemKind::Type = trait_item_ref.kind {
+                        self.check(trait_item_ref.id.hir_id, item_visibility).bounds();
+                    }
                 }
             }
             hir::ItemKind::TraitAlias(..) => {

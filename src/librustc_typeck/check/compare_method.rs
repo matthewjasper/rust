@@ -4,6 +4,7 @@ use rustc_hir::def::{DefKind, Res};
 use rustc_hir::intravisit;
 use rustc_hir::{GenericParamKind, ImplItemKind, TraitItemKind};
 use rustc_infer::infer::{self, InferOk, TyCtxtInferExt};
+use rustc_infer::traits::util;
 use rustc_middle::ty;
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
 use rustc_middle::ty::subst::{InternalSubsts, Subst, SubstsRef};
@@ -1182,20 +1183,13 @@ fn compare_type_predicate_entailment<'tcx>(
 /// For default associated types the normalization is not possible (the value
 /// from the impl could be overridden). We also can't normalize generic
 /// associated types (yet) because they contain bound parameters.
-fn check_type_bounds<'tcx>(
+pub fn check_type_bounds<'tcx>(
     tcx: TyCtxt<'tcx>,
     trait_ty: &ty::AssocItem,
     impl_ty: &ty::AssocItem,
     impl_ty_span: Span,
     impl_trait_ref: ty::TraitRef<'tcx>,
 ) -> Result<(), ErrorReported> {
-    let have_gats = tcx.features().generic_associated_types;
-    if impl_ty.defaultness.is_final() && !have_gats {
-        // For "final", non-generic associate type implementations, we
-        // don't need this as described above.
-        return Ok(());
-    }
-
     let param_env = tcx.param_env(impl_ty.def_id);
 
     // Given
@@ -1235,61 +1229,67 @@ fn check_type_bounds<'tcx>(
 
         let impl_ty_hir_id = tcx.hir().as_local_hir_id(impl_ty.def_id.expect_local());
         let normalize_cause = traits::ObligationCause::misc(impl_ty_span, impl_ty_hir_id);
-        let cause = ObligationCause::new(
-            impl_ty_span,
-            impl_ty_hir_id,
-            ObligationCauseCode::ItemObligation(trait_ty.def_id),
-        );
+        let mk_cause = |span| {
+            ObligationCause::new(
+                impl_ty_span,
+                impl_ty_hir_id,
+                ObligationCauseCode::BindingObligation(trait_ty.def_id, span),
+            )
+        };
 
-        let predicates = tcx.item_bounds(trait_ty.def_id);
+        let bounds = tcx.explicit_item_bounds(trait_ty.def_id);
 
-        debug!("check_type_bounds: item_bounds={:?}", predicates);
+        debug!("check_type_bounds: item_bounds={:?}", bounds);
 
-        for predicate in predicates {
-            let concrete_ty_predicate = match predicate.kind() {
-                ty::PredicateKind::Trait(poly_tr, c) => poly_tr
-                    .map_bound(|tr| {
-                        let trait_substs = translate_predicate_substs(tr.trait_ref.substs);
-                        ty::TraitRef { def_id: tr.def_id(), substs: trait_substs }
-                    })
-                    .with_constness(*c)
-                    .to_predicate(tcx),
-                ty::PredicateKind::Projection(poly_projection) => poly_projection
-                    .map_bound(|projection| {
-                        let projection_substs =
-                            translate_predicate_substs(projection.projection_ty.substs);
-                        ty::ProjectionPredicate {
-                            projection_ty: ty::ProjectionTy {
-                                substs: projection_substs,
-                                item_def_id: projection.projection_ty.item_def_id,
-                            },
-                            ty: projection.ty.subst(tcx, rebased_substs),
-                        }
-                    })
-                    .to_predicate(tcx),
-                ty::PredicateKind::TypeOutlives(poly_outlives) => poly_outlives
-                    .map_bound(|outlives| {
-                        ty::OutlivesPredicate(impl_ty_value, outlives.1.subst(tcx, rebased_substs))
-                    })
-                    .to_predicate(tcx),
-                _ => bug!("unexepected projection predicate kind: `{:?}`", predicate),
-            };
+        let obligations = bounds
+            .iter()
+            .map(|&(bound, span)| {
+                let concrete_ty_bound = match bound.kind() {
+                    ty::PredicateKind::Trait(poly_tr, c) => poly_tr
+                        .map_bound(|tr| {
+                            let trait_substs = translate_predicate_substs(tr.trait_ref.substs);
+                            ty::TraitRef { def_id: tr.def_id(), substs: trait_substs }
+                        })
+                        .with_constness(*c)
+                        .to_predicate(tcx),
+                    ty::PredicateKind::Projection(poly_projection) => poly_projection
+                        .map_bound(|projection| {
+                            let projection_substs =
+                                translate_predicate_substs(projection.projection_ty.substs);
+                            ty::ProjectionPredicate {
+                                projection_ty: ty::ProjectionTy {
+                                    substs: projection_substs,
+                                    item_def_id: projection.projection_ty.item_def_id,
+                                },
+                                ty: projection.ty.subst(tcx, rebased_substs),
+                            }
+                        })
+                        .to_predicate(tcx),
+                    ty::PredicateKind::TypeOutlives(poly_outlives) => poly_outlives
+                        .map_bound(|outlives| {
+                            ty::OutlivesPredicate(
+                                impl_ty_value,
+                                outlives.1.subst(tcx, rebased_substs),
+                            )
+                        })
+                        .to_predicate(tcx),
+                    _ => bug!("unexepected projection bound: `{:?}`", bound),
+                };
+                debug!("compare_projection_bounds: concrete_ty_bound = {:?}", concrete_ty_bound);
+                let traits::Normalized { value: normalized_bound, obligations } = traits::normalize(
+                    &mut selcx,
+                    param_env,
+                    normalize_cause.clone(),
+                    &concrete_ty_bound,
+                );
 
-            let traits::Normalized { value: normalized_predicate, obligations } = traits::normalize(
-                &mut selcx,
-                param_env,
-                normalize_cause.clone(),
-                &concrete_ty_predicate,
-            );
+                inh.register_predicates(obligations);
+                traits::Obligation::new(mk_cause(span), param_env, normalized_bound)
+            })
+            .collect();
 
-            debug!("compare_projection_bounds: normalized predicate = {:?}", normalized_predicate);
-
-            inh.register_predicates(obligations);
-            inh.register_predicate(traits::Obligation::new(
-                cause.clone(),
-                param_env,
-                normalized_predicate,
-            ));
+        for obligation in util::elaborate_obligations(tcx, obligations) {
+            inh.register_predicate(obligation);
         }
 
         // Check that all obligations are satisfied by the implementation's

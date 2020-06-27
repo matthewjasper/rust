@@ -51,14 +51,28 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
         }
         let bound_vars = bound_vars_for_item(self.tcx, def_id);
         let binders = binders_for(&self.interner, bound_vars);
-        // FIXME(chalk): this really isn't right I don't think. The functions
-        // for GATs are a bit hard to figure out. Are these supposed to be where
-        // clauses or bounds?
         let predicates = self.tcx.predicates_defined_on(def_id).predicates;
-        let where_clauses: Vec<_> = predicates
+
+        let where_clauses: Vec<_> =
+            predicates
+                .iter()
+                .map(|(wc, _)| wc.subst(self.tcx, &bound_vars))
+                .filter_map(|wc| {
+                    LowerInto::<Option<chalk_ir::QuantifiedWhereClause<RustInterner<'tcx>>>>::lower_into(wc, &self.interner)
+                })
+                .collect();
+
+        let bounds = self
+            .tcx
+            .explicit_item_bounds(def_id)
             .iter()
-            .map(|(wc, _)| wc.subst(self.tcx, &bound_vars))
-            .filter_map(|wc| LowerInto::<Option<chalk_ir::QuantifiedWhereClause<RustInterner<'tcx>>>>::lower_into(wc, &self.interner)).collect();
+            .map(|(bound, _)| bound.subst(self.tcx, &bound_vars))
+            .filter_map(|bound| {
+                LowerInto::<
+                        Option<chalk_solve::rust_ir::QuantifiedInlineBound<RustInterner<'tcx>>>,
+                    >::lower_into(bound, &self.interner)
+            })
+            .collect();
 
         Arc::new(chalk_solve::rust_ir::AssociatedTyDatum {
             trait_id: chalk_ir::TraitId(trait_def_id),
@@ -66,7 +80,7 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
             name: (),
             binders: chalk_ir::Binders::new(
                 binders,
-                chalk_solve::rust_ir::AssociatedTyDatumBound { bounds: vec![], where_clauses },
+                chalk_solve::rust_ir::AssociatedTyDatumBound { bounds, where_clauses },
             ),
         })
     }
@@ -348,15 +362,16 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
     ) -> Arc<chalk_solve::rust_ir::OpaqueTyDatum<RustInterner<'tcx>>> {
         let bound_vars = bound_vars_for_item(self.tcx, opaque_ty_id.0);
         let binders = binders_for(&self.interner, bound_vars);
-        let predicates = self.tcx.predicates_defined_on(opaque_ty_id.0).predicates;
-        let where_clauses: Vec<_> = predicates
+        let predicates = self.tcx.explicit_item_bounds(opaque_ty_id.0);
+        let bounds: Vec<_> = predicates
             .iter()
-            .map(|(wc, _)| wc.subst(self.tcx, &bound_vars))
-            .filter_map(|wc| LowerInto::<Option<chalk_ir::QuantifiedWhereClause<RustInterner<'tcx>>>>::lower_into(wc, &self.interner)).collect();
+            .map(|(bound, _)| bound.subst(self.tcx, &bound_vars))
+            .filter_map(|bound| LowerInto::<Option<chalk_ir::QuantifiedWhereClause<RustInterner<'tcx>>>>::lower_into(bound, &self.interner)).collect();
 
         let value = chalk_solve::rust_ir::OpaqueTyDatumBound {
-            bounds: chalk_ir::Binders::new(binders, where_clauses),
+            bounds: chalk_ir::Binders::new(binders, bounds),
         };
+        // FIXME(chalk) where clauses on opaque types.
         Arc::new(chalk_solve::rust_ir::OpaqueTyDatum {
             opaque_ty_id,
             bound: chalk_ir::Binders::new(chalk_ir::VariableKinds::new(&self.interner), value),

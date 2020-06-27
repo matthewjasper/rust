@@ -5,7 +5,9 @@ fn main() {
     //~^ ERROR `&str` is not an iterator
     //~| NOTE `&str` is not an iterator
     //~| HELP the trait `std::iter::Iterator` is not implemented for `&str`
+    //~| NOTE required because of the requirements on the impl of `std::iter::IntoIterator` for `&str`
     //~| NOTE required by `std::iter::IntoIterator::into_iter`
+    //~| NOTE in this expansion of desugaring of `for` loop
     //~| NOTE in this expansion of desugaring of `for` loop
     //~| NOTE in this expansion of desugaring of `for` loop
     //~| NOTE in this expansion of desugaring of `for` loop

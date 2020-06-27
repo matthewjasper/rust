@@ -431,17 +431,25 @@ impl<'hir> LoweringContext<'_, 'hir> {
         self.with_catch_scope(body.id, |this| {
             let mut block = this.lower_block_noalloc(body, true);
 
-            let try_span = this.mark_span_with_reason(
-                DesugaringKind::TryBlock,
-                body.span,
-                this.allow_try_trait.clone(),
-            );
-
             // Final expression of the block (if present) or `()` with span at the end of block
-            let tail_expr = block
-                .expr
-                .take()
-                .unwrap_or_else(|| this.expr_unit(this.sess.source_map().end_point(try_span)));
+            let (try_span, tail_expr) = if let Some(expr) = block.expr.take() {
+                (
+                    this.mark_span_with_reason(
+                        DesugaringKind::TryBlock,
+                        expr.span,
+                        this.allow_try_trait.clone(),
+                    ),
+                    expr,
+                )
+            } else {
+                let try_span = this.mark_span_with_reason(
+                    DesugaringKind::TryBlock,
+                    this.sess.source_map().end_point(body.span),
+                    this.allow_try_trait.clone(),
+                );
+
+                (try_span, this.expr_unit(try_span))
+            };
 
             let ok_wrapped_span =
                 this.mark_span_with_reason(DesugaringKind::TryBlock, tail_expr.span, None);
@@ -1561,8 +1569,12 @@ impl<'hir> LoweringContext<'_, 'hir> {
                 let err_expr = self.expr_ident_mut(try_span, err_ident, err_local_nid);
                 self.expr_call_std_path(try_span, from_path, arena_vec![self; err_expr])
             };
-            let from_err_expr =
-                self.wrap_in_try_constructor(sym::from_error, unstable_span, from_expr, try_span);
+            let from_err_expr = self.wrap_in_try_constructor(
+                sym::from_error,
+                unstable_span,
+                from_expr,
+                unstable_span,
+            );
             let thin_attrs = ThinVec::from(attrs);
             let catch_scope = self.catch_scopes.last().copied();
             let ret_expr = if let Some(catch_node) = catch_scope {
