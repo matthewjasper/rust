@@ -7,15 +7,14 @@ use rustc_infer::infer::{self, InferOk, TyCtxtInferExt};
 use rustc_infer::traits::util;
 use rustc_middle::ty;
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
-use rustc_middle::ty::subst::{InternalSubsts, Subst, SubstsRef};
+use rustc_middle::ty::subst::{InternalSubsts, Subst};
 use rustc_middle::ty::util::ExplicitSelf;
-use rustc_middle::ty::{GenericParamDefKind, ToPredicate, TyCtxt, WithConstness};
+use rustc_middle::ty::{GenericParamDefKind, TyCtxt};
 use rustc_span::Span;
 use rustc_trait_selection::traits::error_reporting::InferCtxtExt;
 use rustc_trait_selection::traits::{self, ObligationCause, ObligationCauseCode, Reveal};
 
 use super::{potentially_plural_count, FnCtxt, Inherited};
-use std::iter;
 
 /// Checks that a method from an impl conforms to the signature of
 /// the same method as declared in the trait.
@@ -1206,22 +1205,6 @@ pub fn check_type_bounds<'tcx>(
         impl_ty_substs.rebase_onto(tcx, impl_ty.container.id(), impl_trait_ref.substs);
     let impl_ty_value = tcx.type_of(impl_ty.def_id);
 
-    // Map the predicate from the trait to the corresponding one for the impl.
-    // For example:
-    //
-    // trait X<A> { type Y<'a>: PartialEq<A> } impl X for T { type Y<'a> = &'a S; }
-    // impl<'x> X<&'x u32> for () { type Y<'c> = &'c u32; }
-    //
-    // For the `for<'a> <<Self as X<A>>::Y<'a>: PartialEq<A>` bound, this
-    // function would translate and partially normalize
-    // `[<Self as X<A>>::Y<'a>, A]` to `[&'a u32, &'x u32]`.
-    let translate_predicate_substs = move |predicate_substs: SubstsRef<'tcx>| {
-        tcx.mk_substs(
-            iter::once(impl_ty_value.into())
-                .chain(predicate_substs[1..].iter().map(|s| s.subst(tcx, rebased_substs))),
-        )
-    };
-
     tcx.infer_ctxt().enter(move |infcx| {
         let inh = Inherited::new(infcx, impl_ty.def_id.expect_local());
         let infcx = &inh.infcx;
@@ -1244,37 +1227,8 @@ pub fn check_type_bounds<'tcx>(
         let obligations = bounds
             .iter()
             .map(|&(bound, span)| {
-                let concrete_ty_bound = match bound.kind() {
-                    ty::PredicateKind::Trait(poly_tr, c) => poly_tr
-                        .map_bound(|tr| {
-                            let trait_substs = translate_predicate_substs(tr.trait_ref.substs);
-                            ty::TraitRef { def_id: tr.def_id(), substs: trait_substs }
-                        })
-                        .with_constness(*c)
-                        .to_predicate(tcx),
-                    ty::PredicateKind::Projection(poly_projection) => poly_projection
-                        .map_bound(|projection| {
-                            let projection_substs =
-                                translate_predicate_substs(projection.projection_ty.substs);
-                            ty::ProjectionPredicate {
-                                projection_ty: ty::ProjectionTy {
-                                    substs: projection_substs,
-                                    item_def_id: projection.projection_ty.item_def_id,
-                                },
-                                ty: projection.ty.subst(tcx, rebased_substs),
-                            }
-                        })
-                        .to_predicate(tcx),
-                    ty::PredicateKind::TypeOutlives(poly_outlives) => poly_outlives
-                        .map_bound(|outlives| {
-                            ty::OutlivesPredicate(
-                                impl_ty_value,
-                                outlives.1.subst(tcx, rebased_substs),
-                            )
-                        })
-                        .to_predicate(tcx),
-                    _ => bug!("unexepected projection bound: `{:?}`", bound),
-                };
+                let concrete_ty_bound =
+                    traits::subst_assoc_item_bound(tcx, bound, impl_ty_value, rebased_substs);
                 debug!("compare_projection_bounds: concrete_ty_bound = {:?}", concrete_ty_bound);
                 let traits::Normalized { value: normalized_bound, obligations } = traits::normalize(
                     &mut selcx,
