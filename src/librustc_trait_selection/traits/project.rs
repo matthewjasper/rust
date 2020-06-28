@@ -150,7 +150,7 @@ pub fn poly_project_and_unify_type<'cx, 'tcx>(
 
     let infcx = selcx.infcx();
     infcx.commit_if_ok(|_snapshot| {
-        let (placeholder_predicate, _) =
+        let placeholder_predicate =
             infcx.replace_bound_vars_with_placeholders(&obligation.predicate);
 
         let placeholder_obligation = obligation.with(placeholder_predicate);
