@@ -159,6 +159,10 @@ fn object_safety_violations_for_trait(
     if !spans.is_empty() {
         violations.push(ObjectSafetyViolation::SupertraitSelf(spans));
     }
+    let spans = bounds_reference_self(tcx, trait_def_id);
+    if !spans.is_empty() {
+        violations.push(ObjectSafetyViolation::SupertraitSelf(spans));
+    }
 
     violations.extend(
         tcx.associated_items(trait_def_id)
@@ -238,55 +242,69 @@ fn predicates_reference_self(
     } else {
         tcx.predicates_of(trait_def_id)
     };
-    let self_ty = tcx.types.self_param;
-    let has_self_ty = |arg: &GenericArg<'_>| arg.walk().any(|arg| arg == self_ty.into());
     predicates
         .predicates
         .iter()
-        .map(|(predicate, sp)| (predicate.subst_supertrait(tcx, &trait_ref), sp))
-        .filter_map(|(predicate, &sp)| {
-            match predicate.kind() {
-                ty::PredicateKind::Trait(ref data, _) => {
-                    // In the case of a trait predicate, we can skip the "self" type.
-                    if data.skip_binder().trait_ref.substs[1..].iter().any(has_self_ty) {
-                        Some(sp)
-                    } else {
-                        None
-                    }
-                }
-                ty::PredicateKind::Projection(ref data) => {
-                    // And similarly for projections. This should be redundant with
-                    // the previous check because any projection should have a
-                    // matching `Trait` predicate with the same inputs, but we do
-                    // the check to be safe.
-                    //
-                    // Note that we *do* allow projection *outputs* to contain
-                    // `self` (i.e., `trait Foo: Bar<Output=Self::Result> { type Result; }`),
-                    // we just require the user to specify *both* outputs
-                    // in the object type (i.e., `dyn Foo<Output=(), Result=()>`).
-                    //
-                    // This is ALT2 in issue #56288, see that for discussion of the
-                    // possible alternatives.
-                    if data.skip_binder().projection_ty.trait_ref(tcx).substs[1..]
-                        .iter()
-                        .any(has_self_ty)
-                    {
-                        Some(sp)
-                    } else {
-                        None
-                    }
-                }
-                ty::PredicateKind::WellFormed(..)
-                | ty::PredicateKind::ObjectSafe(..)
-                | ty::PredicateKind::TypeOutlives(..)
-                | ty::PredicateKind::RegionOutlives(..)
-                | ty::PredicateKind::ClosureKind(..)
-                | ty::PredicateKind::Subtype(..)
-                | ty::PredicateKind::ConstEvaluatable(..)
-                | ty::PredicateKind::ConstEquate(..) => None,
-            }
-        })
+        .map(|(predicate, sp)| (predicate.subst_supertrait(tcx, &trait_ref), *sp))
+        .filter_map(|predicate| predicate_references_self(tcx, predicate))
         .collect()
+}
+
+fn bounds_reference_self(tcx: TyCtxt<'_>, trait_def_id: DefId) -> SmallVec<[Span; 1]> {
+    let trait_ref = ty::Binder::dummy(ty::TraitRef::identity(tcx, trait_def_id));
+    tcx
+        .associated_items(trait_def_id)
+        .in_definition_order()
+        .filter(|item| item.kind == ty::AssocKind::Type)
+        .flat_map(|item| tcx.explicit_item_bounds(item.def_id))
+        .map(|(predicate, sp)| (predicate.subst_supertrait(tcx, &trait_ref), *sp))
+        .filter_map(|predicate| predicate_references_self(tcx, predicate))
+        .collect()
+}
+
+fn predicate_references_self(tcx: TyCtxt<'tcx>, (predicate, sp): (ty::Predicate<'tcx>, Span)) -> Option<Span> {
+    let self_ty = tcx.types.self_param;
+    let has_self_ty = |arg: &GenericArg<'_>| arg.walk().any(|arg| arg == self_ty.into());
+    match predicate.kind() {
+        ty::PredicateKind::Trait(ref data, _) => {
+            // In the case of a trait predicate, we can skip the "self" type.
+            if data.skip_binder().trait_ref.substs[1..].iter().any(has_self_ty) {
+                Some(sp)
+            } else {
+                None
+            }
+        }
+        ty::PredicateKind::Projection(ref data) => {
+            // And similarly for projections. This should be redundant with
+            // the previous check because any projection should have a
+            // matching `Trait` predicate with the same inputs, but we do
+            // the check to be safe.
+            //
+            // It's also won't be redundant if we allow type-generic associated
+            // types for trait objects.
+            //
+            // Note that we *do* allow projection *outputs* to contain
+            // `self` (i.e., `trait Foo: Bar<Output=Self::Result> { type Result; }`),
+            // we just require the user to specify *both* outputs
+            // in the object type (i.e., `dyn Foo<Output=(), Result=()>`).
+            //
+            // This is ALT2 in issue #56288, see that for discussion of the
+            // possible alternatives.
+            if data.skip_binder().projection_ty.trait_ref(tcx).substs[1..].iter().any(has_self_ty) {
+                Some(sp)
+            } else {
+                None
+            }
+        }
+        ty::PredicateKind::WellFormed(..)
+        | ty::PredicateKind::ObjectSafe(..)
+        | ty::PredicateKind::TypeOutlives(..)
+        | ty::PredicateKind::RegionOutlives(..)
+        | ty::PredicateKind::ClosureKind(..)
+        | ty::PredicateKind::Subtype(..)
+        | ty::PredicateKind::ConstEvaluatable(..)
+        | ty::PredicateKind::ConstEquate(..) => None,
+    }
 }
 
 fn trait_has_sized_self(tcx: TyCtxt<'_>, trait_def_id: DefId) -> bool {
