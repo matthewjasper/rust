@@ -1230,19 +1230,20 @@ pub fn check_type_bounds<'tcx>(
                 let concrete_ty_bound =
                     traits::subst_assoc_item_bound(tcx, bound, impl_ty_value, rebased_substs);
                 debug!("compare_projection_bounds: concrete_ty_bound = {:?}", concrete_ty_bound);
-                let traits::Normalized { value: normalized_bound, obligations } = traits::normalize(
-                    &mut selcx,
-                    param_env,
-                    normalize_cause.clone(),
-                    &concrete_ty_bound,
-                );
-
-                inh.register_predicates(obligations);
-                traits::Obligation::new(mk_cause(span), param_env, normalized_bound)
+                traits::Obligation::new(mk_cause(span), param_env, concrete_ty_bound)
             })
             .collect();
 
-        for obligation in util::elaborate_obligations(tcx, obligations) {
+        for mut obligation in util::elaborate_obligations(tcx, obligations) {
+            let traits::Normalized { value: normalized_bound, obligations } = traits::normalize(
+                &mut selcx,
+                param_env,
+                normalize_cause.clone(),
+                &obligation.predicate,
+            );
+            obligation.predicate = normalized_bound;
+
+            inh.register_predicates(obligations);
             inh.register_predicate(obligation);
         }
 

@@ -88,7 +88,7 @@
   
       bb6: {
           StorageDead(_9);                 // scope 3 at $DIR/simplify-arm.rs:24:14: 24:15
-          _0 = const <std::result::Result<u8, i32> as std::ops::Try>::from_error(move _8) -> bb7; // scope 3 at $DIR/simplify-arm.rs:24:14: 24:15
+          _0 = const <std::result::Result<u8, i32> as std::ops::Try>::from_error(move _8) -> bb7; // scope 3 at $DIR/simplify-arm.rs:24:13: 24:15
                                            // ty::Const
                                            // + ty: fn(<std::result::Result<u8, i32> as std::ops::Try>::Error) -> std::result::Result<u8, i32> {<std::result::Result<u8, i32> as std::ops::Try>::from_error}
                                            // + val: Value(Scalar(<ZST>))

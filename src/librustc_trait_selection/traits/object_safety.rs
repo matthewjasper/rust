@@ -252,8 +252,7 @@ fn predicates_reference_self(
 
 fn bounds_reference_self(tcx: TyCtxt<'_>, trait_def_id: DefId) -> SmallVec<[Span; 1]> {
     let trait_ref = ty::Binder::dummy(ty::TraitRef::identity(tcx, trait_def_id));
-    tcx
-        .associated_items(trait_def_id)
+    tcx.associated_items(trait_def_id)
         .in_definition_order()
         .filter(|item| item.kind == ty::AssocKind::Type)
         .flat_map(|item| tcx.explicit_item_bounds(item.def_id))
@@ -262,7 +261,10 @@ fn bounds_reference_self(tcx: TyCtxt<'_>, trait_def_id: DefId) -> SmallVec<[Span
         .collect()
 }
 
-fn predicate_references_self(tcx: TyCtxt<'tcx>, (predicate, sp): (ty::Predicate<'tcx>, Span)) -> Option<Span> {
+fn predicate_references_self(
+    tcx: TyCtxt<'tcx>,
+    (predicate, sp): (ty::Predicate<'tcx>, Span),
+) -> Option<Span> {
     let self_ty = tcx.types.self_param;
     let has_self_ty = |arg: &GenericArg<'_>| arg.walk().any(|arg| arg == self_ty.into());
     match predicate.kind() {
