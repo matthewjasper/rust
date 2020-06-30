@@ -20,7 +20,7 @@ use rustc_infer::infer::region_constraints::{Constraint, RegionConstraintData};
 use rustc_middle::middle::resolve_lifetime as rl;
 use rustc_middle::middle::stability;
 use rustc_middle::ty::fold::TypeFolder;
-use rustc_middle::ty::subst::InternalSubsts;
+use rustc_middle::ty::subst::{InternalSubsts, Subst};
 use rustc_middle::ty::{self, AdtKind, Lift, Ty, TyCtxt};
 use rustc_mir::const_eval::is_min_const_fn;
 use rustc_span::hygiene::MacroKind;
@@ -1239,13 +1239,10 @@ impl Clean<Item> for ty::AssocItem {
             ty::AssocKind::Type => {
                 let my_name = self.ident.name.clean(cx);
 
-                if let ty::TraitContainer(did) = self.container {
-                    // When loading a cross-crate associated type, the bounds for this type
-                    // are actually located on the trait/impl itself, so we need to load
-                    // all of the generics from there and then look for bounds that are
-                    // applied to this associated type in question.
-                    let predicates = cx.tcx.explicit_predicates_of(did);
-                    let generics = (cx.tcx.generics_of(did), predicates).clean(cx);
+                if let ty::TraitContainer(_) = self.container {
+                    let bounds = cx.tcx.explicit_item_bounds(self.def_id);
+                    let predicates = ty::GenericPredicates { parent: None, predicates: bounds };
+                    let generics = (cx.tcx.generics_of(self.def_id), predicates).clean(cx);
                     let mut bounds = generics
                         .where_predicates
                         .iter()
@@ -1643,19 +1640,22 @@ impl<'tcx> Clean<Type> for Ty<'tcx> {
 
             ty::Opaque(def_id, substs) => {
                 // Grab the "TraitA + TraitB" from `impl TraitA + TraitB`,
-                // by looking up the projections associated with the def_id.
-                let predicates_of = cx.tcx.explicit_predicates_of(def_id);
+                // by looking up the bounds associated with the def_id.
                 let substs = cx.tcx.lift(&substs).expect("Opaque lift failed");
-                let bounds = predicates_of.instantiate(cx.tcx, substs);
+                let bounds = cx
+                    .tcx
+                    .explicit_item_bounds(def_id)
+                    .iter()
+                    .map(|(bound, _)| bound.subst(cx.tcx, substs))
+                    .collect::<Vec<_>>();
                 let mut regions = vec![];
                 let mut has_sized = false;
                 let mut bounds = bounds
-                    .predicates
                     .iter()
-                    .filter_map(|predicate| {
-                        let trait_ref = if let Some(tr) = predicate.to_opt_poly_trait_ref() {
+                    .filter_map(|bound| {
+                        let trait_ref = if let Some(tr) = bound.to_opt_poly_trait_ref() {
                             tr
-                        } else if let ty::PredicateKind::TypeOutlives(pred) = predicate.kind() {
+                        } else if let ty::PredicateKind::TypeOutlives(pred) = bound.kind() {
                             // these should turn up at the end
                             if let Some(r) = pred.skip_binder().1.clean(cx) {
                                 regions.push(GenericBound::Outlives(r));
@@ -1673,10 +1673,9 @@ impl<'tcx> Clean<Type> for Ty<'tcx> {
                         }
 
                         let bounds: Vec<_> = bounds
-                            .predicates
                             .iter()
-                            .filter_map(|pred| {
-                                if let ty::PredicateKind::Projection(proj) = pred.kind() {
+                            .filter_map(|bound| {
+                                if let ty::PredicateKind::Projection(proj) = bound.kind() {
                                     let proj = proj.skip_binder();
                                     if proj.projection_ty.trait_ref(cx.tcx)
                                         == trait_ref.skip_binder()
@@ -2032,13 +2031,10 @@ impl Clean<Item> for doctree::OpaqueTy<'_> {
             visibility: self.vis.clean(cx),
             stability: cx.stability(self.id).clean(cx),
             deprecation: cx.deprecation(self.id).clean(cx),
-            inner: OpaqueTyItem(
-                OpaqueTy {
-                    bounds: self.opaque_ty.bounds.clean(cx),
-                    generics: self.opaque_ty.generics.clean(cx),
-                },
-                false,
-            ),
+            inner: OpaqueTyItem(OpaqueTy {
+                bounds: self.opaque_ty.bounds.clean(cx),
+                generics: self.opaque_ty.generics.clean(cx),
+            }),
         }
     }
 }
