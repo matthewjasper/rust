@@ -415,6 +415,8 @@ impl<'cx, 'tcx> TypeFolder<'tcx> for Canonicalizer<'cx, 'tcx> {
             | ty::Never
             | ty::Tuple(..)
             | ty::Projection(..)
+            // TODO: Should this revert to `Projection` when canonicalized?
+            | ty::UnnormalizedProjection(..)
             | ty::Foreign(..)
             | ty::Param(..)
             | ty::Opaque(..) => {

@@ -293,6 +293,7 @@ pub fn characteristic_def_id_of_type(ty: Ty<'_>) -> Option<DefId> {
         | ty::Str
         | ty::FnPtr(_)
         | ty::Projection(_)
+        | ty::UnnormalizedProjection(_)
         | ty::Placeholder(..)
         | ty::Param(_)
         | ty::Opaque(..)

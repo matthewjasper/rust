@@ -1,7 +1,7 @@
-use super::combine::{CombineFields, RelationDir};
+use super::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
 use super::SubregionOrigin;
 
-use crate::infer::combine::ConstEquateRelation;
+use crate::infer::combine::{CombineFields, ConstEquateRelation, RelationDir};
 use crate::traits::Obligation;
 use rustc_middle::ty::fold::TypeFoldable;
 use rustc_middle::ty::relate::{Cause, Relate, RelateResult, TypeRelation};
@@ -84,6 +84,24 @@ impl TypeRelation<'tcx> for Sub<'combine, 'infcx, 'tcx> {
         let a = infcx.inner.borrow_mut().type_variables().replace_if_possible(a);
         let b = infcx.inner.borrow_mut().type_variables().replace_if_possible(b);
         match (&a.kind, &b.kind) {
+            (&ty::Projection(a_proj), _) => {
+                let var = self.fields.infcx.next_ty_var(TypeVariableOrigin {
+                    kind: TypeVariableOriginKind::MiscVariable,
+                    span: self.fields.trace.cause.span,
+                });
+                self.fields.add_projection_equate_obligation(a_proj, var);
+                self.tys(var, b)
+            }
+
+            (_, &ty::Projection(b_proj)) => {
+                let var = self.fields.infcx.next_ty_var(TypeVariableOrigin {
+                    kind: TypeVariableOriginKind::MiscVariable,
+                    span: self.fields.trace.cause.span,
+                });
+                self.fields.add_projection_equate_obligation(b_proj, var);
+                self.tys(a, var)
+            }
+
             (&ty::Infer(TyVar(a_vid)), &ty::Infer(TyVar(b_vid))) => {
                 // Shouldn't have any LBR here, so we can safely put
                 // this under a binder below without fear of accidental

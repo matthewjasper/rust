@@ -208,16 +208,6 @@ impl<'a, 'tcx> ConstraintContext<'a, 'tcx> {
         }
     }
 
-    fn add_constraints_from_trait_ref(
-        &mut self,
-        current: &CurrentItem,
-        trait_ref: ty::TraitRef<'tcx>,
-        variance: VarianceTermPtr<'a>,
-    ) {
-        debug!("add_constraints_from_trait_ref: trait_ref={:?} variance={:?}", trait_ref, variance);
-        self.add_constraints_from_invariant_substs(current, trait_ref.substs, variance);
-    }
-
     fn add_constraints_from_invariant_substs(
         &mut self,
         current: &CurrentItem,
@@ -300,9 +290,8 @@ impl<'a, 'tcx> ConstraintContext<'a, 'tcx> {
                 self.add_constraints_from_substs(current, def.did, substs, variance);
             }
 
-            ty::Projection(ref data) => {
-                let tcx = self.tcx();
-                self.add_constraints_from_trait_ref(current, data.trait_ref(tcx), variance);
+            ty::Projection(ref data) | ty::UnnormalizedProjection(ref data) => {
+                self.add_constraints_from_invariant_substs(current, data.substs, variance);
             }
 
             ty::Opaque(_, substs) => {

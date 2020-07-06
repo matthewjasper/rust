@@ -41,7 +41,7 @@ fn sized_constraint_for_ty<'tcx>(
                 .collect()
         }
 
-        Projection(..) | Opaque(..) => {
+        Projection(..) | UnnormalizedProjection(..) | Opaque(..) => {
             // must calculate explicitly.
             // FIXME: consider special-casing always-Sized projections
             vec![ty]
@@ -246,32 +246,10 @@ fn param_env(tcx: TyCtxt<'_>, def_id: DefId) -> ty::ParamEnv<'_> {
     let ty::InstantiatedPredicates { predicates, .. } =
         tcx.predicates_of(def_id).instantiate_identity(tcx);
 
-    // Finally, we have to normalize the bounds in the environment, in
-    // case they contain any associated type projections. This process
-    // can yield errors if the put in illegal associated types, like
-    // `<i32 as Foo>::Bar` where `i32` does not implement `Foo`. We
-    // report these errors right here; this doesn't actually feel
-    // right to me, because constructing the environment feels like a
-    // kind of a "idempotent" action, but I'm not sure where would be
-    // a better place. In practice, we construct environments for
-    // every fn once during type checking, and we'll abort if there
-    // are any errors at that point, so after type checking you can be
-    // sure that this will succeed without errors anyway.
-
-    let unnormalized_env = ty::ParamEnv::new(
-        tcx.intern_predicates(&predicates),
-        traits::Reveal::UserFacing,
-        tcx.sess.opts.debugging_opts.chalk.then_some(def_id),
-    );
-
-    let body_id = def_id
-        .as_local()
-        .map(|def_id| tcx.hir().as_local_hir_id(def_id))
-        .map_or(hir::CRATE_HIR_ID, |id| {
-            tcx.hir().maybe_body_owned_by(id).map_or(id, |body| body.hir_id)
-        });
-    let cause = traits::ObligationCause::misc(tcx.def_span(def_id), body_id);
-    traits::normalize_param_env_or_error(tcx, def_id, unnormalized_env, cause)
+    // Finally, we have to elaborate predicates from the environment, so that
+    // if the user has written, for example, `F: Fn()` then we can find `F:
+    // FnMut()` in the environment as well.
+    traits::mk_param_env(tcx, &predicates, tcx.sess.opts.debugging_opts.chalk.then_some(def_id))
 }
 
 fn crate_disambiguator(tcx: TyCtxt<'_>, crate_num: CrateNum) -> CrateDisambiguator {

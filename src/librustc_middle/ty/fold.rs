@@ -76,8 +76,12 @@ pub trait TypeFoldable<'tcx>: fmt::Debug + Clone {
     fn has_type_flags(&self, flags: TypeFlags) -> bool {
         self.visit_with(&mut HasTypeFlagsVisitor { flags })
     }
+    // TODO: make this `is_normalizable_with(self, r: traits::Reveal)`?
     fn has_projections(&self) -> bool {
         self.has_type_flags(TypeFlags::HAS_PROJECTION)
+    }
+    fn has_unnormalized_projections(&self) -> bool {
+        self.has_type_flags(TypeFlags::HAS_TY_UNNORMALIZED_PROJECTION)
     }
     fn has_opaque_types(&self) -> bool {
         self.has_type_flags(TypeFlags::HAS_TY_OPAQUE)

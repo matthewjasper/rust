@@ -1,5 +1,6 @@
 use super::combine::{CombineFields, ConstEquateRelation, RelationDir};
 use super::Subtype;
+use crate::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
 
 use rustc_middle::ty::relate::{self, Relate, RelateResult, TypeRelation};
 use rustc_middle::ty::subst::SubstsRef;
@@ -78,8 +79,30 @@ impl TypeRelation<'tcx> for Equate<'combine, 'infcx, 'tcx> {
         debug!("{}.tys: replacements ({:?}, {:?})", self.tag(), a, b);
 
         match (&a.kind, &b.kind) {
+            (&ty::Projection(a_proj), &ty::Projection(b_proj)) => {
+                let var = infcx.next_ty_var(TypeVariableOrigin {
+                    kind: TypeVariableOriginKind::MiscVariable,
+                    span: self.fields.trace.cause.span,
+                });
+                self.fields.add_projection_equate_obligation(a_proj, var);
+                self.fields.add_projection_equate_obligation(b_proj, var);
+            }
+
+            // We can't immediately unify projections with inference variables
+            // if the projection has inference variables because we might have,
+            // for example, `<&_#1 as std::ops::Deref>::Target == _#1`, which
+            // is fine after normalizing the projection, but would cause occurs
+            // check issues if we immediately unified.
+            (&ty::Projection(a_proj), _) => {
+                self.fields.add_projection_equate_obligation(a_proj, b);
+            }
+
+            (_, &ty::Projection(b_proj)) => {
+                self.fields.add_projection_equate_obligation(b_proj, a);
+            }
+
             (&ty::Infer(TyVar(a_id)), &ty::Infer(TyVar(b_id))) => {
-                infcx.inner.borrow_mut().type_variables().equate(a_id, b_id);
+                self.fields.infcx.inner.borrow_mut().type_variables().equate(a_id, b_id);
             }
 
             (&ty::Infer(TyVar(a_id)), _) => {
@@ -94,7 +117,6 @@ impl TypeRelation<'tcx> for Equate<'combine, 'infcx, 'tcx> {
                 self.fields.infcx.super_combine_tys(self, a, b)?;
             }
         }
-
         Ok(a)
     }
 

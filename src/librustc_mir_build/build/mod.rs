@@ -13,7 +13,7 @@ use rustc_infer::infer::TyCtxtInferExt;
 use rustc_middle::middle::region;
 use rustc_middle::mir::*;
 use rustc_middle::ty::subst::Subst;
-use rustc_middle::ty::{self, Ty, TyCtxt, TypeFoldable};
+use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_span::symbol::kw;
 use rustc_span::Span;
 use rustc_target::spec::abi::Abi;
@@ -182,19 +182,6 @@ fn mir_build(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Body<'_> {
         };
 
         lints::check(tcx, &body, def_id);
-
-        // The borrow checker will replace all the regions here with its own
-        // inference variables. There's no point having non-erased regions here.
-        // The exception is `body.user_type_annotations`, which is used unmodified
-        // by borrow checking.
-        debug_assert!(
-            !(body.local_decls.has_free_regions()
-                || body.basic_blocks().has_free_regions()
-                || body.var_debug_info.has_free_regions()
-                || body.yield_ty.has_free_regions()),
-            "Unexpected free regions in MIR: {:?}",
-            body,
-        );
 
         body
     })

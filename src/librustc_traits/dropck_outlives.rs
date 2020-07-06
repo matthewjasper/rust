@@ -267,7 +267,7 @@ fn dtorck_constraint_for_ty<'tcx>(
         }
 
         // Types that can't be resolved. Pass them forward.
-        ty::Projection(..) | ty::Opaque(..) | ty::Param(..) => {
+        ty::Projection(..) | ty::UnnormalizedProjection(..) | ty::Opaque(..) | ty::Param(..) => {
             constraints.dtorck_types.push(ty);
         }
 

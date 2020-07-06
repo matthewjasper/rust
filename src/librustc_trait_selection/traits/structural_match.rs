@@ -155,7 +155,7 @@ impl<'a, 'tcx> TypeVisitor<'tcx> for Search<'a, 'tcx> {
                 self.found = Some(NonStructuralMatchTy::Opaque);
                 return true; // Stop visiting.
             }
-            ty::Projection(..) => {
+            ty::Projection(..) | ty::UnnormalizedProjection(..) => {
                 self.found = Some(NonStructuralMatchTy::Projection);
                 return true; // Stop visiting.
             }

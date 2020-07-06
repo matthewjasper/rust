@@ -525,20 +525,9 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                         span_bug!(span, "subtype requirement gave wrong error: `{:?}`", predicate)
                     }
 
-                    ty::PredicateKind::RegionOutlives(ref predicate) => {
-                        let predicate = self.resolve_vars_if_possible(predicate);
-                        let err = self
-                            .region_outlives_predicate(&obligation.cause, predicate)
-                            .err()
-                            .unwrap();
-                        struct_span_err!(
-                            self.tcx.sess,
-                            span,
-                            E0279,
-                            "the requirement `{}` is not satisfied (`{}`)",
-                            predicate,
-                            err,
-                        )
+                    ty::PredicateKind::RegionOutlives(_) => {
+                        // TODO E0279
+                        bug!("RegionOutlives predicates cannot have selection error");
                     }
 
                     ty::PredicateKind::Projection(..) | ty::PredicateKind::TypeOutlives(..) => {
@@ -1254,7 +1243,7 @@ impl<'a, 'tcx> InferCtxtPrivExt<'tcx> for InferCtxt<'a, 'tcx> {
                 ty::Dynamic(..) => Some(8),
                 ty::Closure(..) => Some(9),
                 ty::Tuple(..) => Some(10),
-                ty::Projection(..) => Some(11),
+                ty::UnnormalizedProjection(..) => Some(11),
                 ty::Param(..) => Some(12),
                 ty::Opaque(..) => Some(13),
                 ty::Never => Some(14),
@@ -1266,7 +1255,11 @@ impl<'a, 'tcx> InferCtxtPrivExt<'tcx> for InferCtxt<'a, 'tcx> {
                 ty::Generator(..) => Some(18),
                 ty::Foreign(..) => Some(19),
                 ty::GeneratorWitness(..) => Some(20),
-                ty::Placeholder(..) | ty::Bound(..) | ty::Infer(..) | ty::Error(_) => None,
+                ty::Projection(..)
+                | ty::Placeholder(..)
+                | ty::Bound(..)
+                | ty::Infer(..)
+                | ty::Error(_) => None,
             }
         }
 

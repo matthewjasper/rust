@@ -12,7 +12,7 @@ use crate::infer::canonical::{
     Canonical, CanonicalVarValues, CanonicalizedQueryResponse, Certainty, OriginalQueryValues,
     QueryOutlivesConstraint, QueryRegionConstraints, QueryResponse,
 };
-use crate::infer::nll_relate::{NormalizationStrategy, TypeRelating, TypeRelatingDelegate};
+use crate::infer::nll_relate::{TypeRelating, TypeRelatingDelegate};
 use crate::infer::region_constraints::{Constraint, RegionConstraintData};
 use crate::infer::{InferCtxt, InferOk, InferResult, NLLRegionVariableOrigin};
 use crate::traits::query::{Fallible, NoSolution};
@@ -674,15 +674,30 @@ impl<'tcx> TypeRelatingDelegate<'tcx> for QueryTypeRelatingDelegate<'_, 'tcx> {
         });
     }
 
-    fn const_equate(&mut self, _a: &'tcx Const<'tcx>, _b: &'tcx Const<'tcx>) {
-        span_bug!(
-            self.cause.span(self.infcx.tcx),
-            "lazy_normalization_consts: unreachable `const_equate`"
-        );
+    fn param_env(&self) -> ty::ParamEnv<'tcx> {
+        self.param_env
     }
 
-    fn normalization() -> NormalizationStrategy {
-        NormalizationStrategy::Eager
+    fn const_equate(&mut self, a: &'tcx Const<'tcx>, b: &'tcx Const<'tcx>) {
+        self.obligations.push(Obligation {
+            cause: self.cause.clone(),
+            param_env: self.param_env,
+            predicate: ty::PredicateKind::ConstEquate(a, b).to_predicate(self.infcx.tcx),
+            recursion_depth: 0,
+        });
+    }
+
+    fn push_projection_predicate(&mut self, projection_ty: ty::ProjectionTy<'tcx>, ty: Ty<'tcx>) {
+        self.obligations.push(Obligation {
+            cause: self.cause.clone(),
+            param_env: self.param_env,
+            predicate: ty::PredicateKind::Projection(ty::Binder::dummy(ty::ProjectionPredicate {
+                projection_ty,
+                ty,
+            }))
+            .to_predicate(self.infcx.tcx),
+            recursion_depth: 0,
+        })
     }
 
     fn forbid_inference_vars() -> bool {

@@ -1,12 +1,13 @@
 use rustc_errors::ErrorReported;
 use rustc_hir::def_id::DefId;
 use rustc_infer::infer::TyCtxtInferExt;
+use rustc_middle::traits::Reveal;
 use rustc_middle::ty::subst::SubstsRef;
 use rustc_middle::ty::{self, Instance, TyCtxt, TypeFoldable};
 use rustc_span::sym;
 use rustc_target::spec::abi::Abi;
 use rustc_trait_selection::traits;
-use traits::{translate_substs, Reveal};
+use traits::translate_substs;
 
 use log::debug;
 

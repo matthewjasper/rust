@@ -437,8 +437,6 @@ fn optimized_mir(tcx: TyCtxt<'_>, def_id: DefId) -> Body<'_> {
     let mut body = tcx.mir_drops_elaborated_and_const_checked(def_id).steal();
     run_optimization_passes(tcx, &mut body, def_id, None);
 
-    debug_assert!(!body.has_free_regions(), "Free regions in optimized MIR");
-
     body
 }
 
@@ -457,8 +455,6 @@ fn promoted_mir(tcx: TyCtxt<'_>, def_id: DefId) -> IndexVec<Promoted, Body<'_>> 
         run_post_borrowck_cleanup_passes(tcx, &mut body, def_id, Some(p));
         run_optimization_passes(tcx, &mut body, def_id, Some(p));
     }
-
-    debug_assert!(!promoted.has_free_regions(), "Free regions in promoted MIR");
 
     promoted
 }

@@ -1,7 +1,7 @@
 //! Validates the MIR to ensure that invariants are upheld.
 
 use super::{MirPass, MirSource};
-use rustc_middle::mir::visit::Visitor;
+use rustc_middle::mir::visit::{TyContext, Visitor};
 use rustc_middle::{
     mir::{
         BasicBlock, Body, Location, Operand, Rvalue, Statement, StatementKind, Terminator,
@@ -10,7 +10,8 @@ use rustc_middle::{
     ty::{
         self,
         relate::{Relate, RelateResult, TypeRelation},
-        ParamEnv, Ty, TyCtxt,
+        subst::SubstsRef,
+        ParamEnv, Ty, TyCtxt, TypeFoldable,
     },
 };
 
@@ -201,6 +202,20 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
     }
 }
 
+// Type flags for things that shouldn't occur in MIR:
+// * All regions should have been erased by typeck
+// * We shouldn't have placeholders (HAS_FREE_REGIONS subsumes
+//   HAS_RE_PLACEHOLDER)
+// * Unnormalized projections: codegen will monomorphize types, and so should
+//   be able to normalize them if they were too generic for typeck to handle.
+const INVALID_MIR_TYPE_FLAGS: ty::TypeFlags = ty::TypeFlags::from_bits_truncate(
+    ty::TypeFlags::HAS_FREE_REGIONS.bits()
+        | ty::TypeFlags::NEEDS_INFER.bits()
+        | ty::TypeFlags::HAS_CT_PLACEHOLDER.bits()
+        | ty::TypeFlags::HAS_TY_PLACEHOLDER.bits()
+        | ty::TypeFlags::HAS_TY_UNNORMALIZED_PROJECTION.bits(),
+);
+
 impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
     fn visit_operand(&mut self, operand: &Operand<'tcx>, location: Location) {
         // `Operand::Copy` is only supposed to be used with `Copy` types.
@@ -248,6 +263,40 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn visit_region(&mut self, region: &ty::Region<'tcx>, location: Location) {
+        // Not true for borrowck's copy of the MIR, but we don't run against
+        // that.
+        if **region != ty::RegionKind::ReErased {
+            self.fail(location, format!("unerased region in MIR: {:?}", region));
+        }
+    }
+
+    fn visit_ty(&mut self, ty: Ty<'tcx>, context: TyContext) {
+        let location =
+            if let TyContext::Location(location) = context { location } else { Location::START };
+        if ty.has_escaping_bound_vars() {
+            self.fail(location, format!("type with escaping bound vars: {:?}", ty));
+        } else if ty.has_type_flags(INVALID_MIR_TYPE_FLAGS) {
+            self.fail(location, format!("type with invalid type flags: {:?}", ty));
+        }
+    }
+
+    fn visit_const(&mut self, constant: &&'tcx ty::Const<'tcx>, location: Location) {
+        if constant.has_escaping_bound_vars() {
+            self.fail(location, format!("const with escaping bound vars: {:?}", constant));
+        } else if constant.has_type_flags(INVALID_MIR_TYPE_FLAGS) {
+            self.fail(location, format!("const with invalid type flags: {:?}", constant));
+        }
+    }
+
+    fn visit_substs(&mut self, substs: &SubstsRef<'tcx>, location: Location) {
+        if substs.has_escaping_bound_vars() {
+            self.fail(location, format!("substs with escaping bound vars: {:?}", substs));
+        } else if substs.has_type_flags(INVALID_MIR_TYPE_FLAGS) {
+            self.fail(location, format!("substs with invalid type flags: {:?}", substs));
         }
     }
 

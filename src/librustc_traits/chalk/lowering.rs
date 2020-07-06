@@ -437,6 +437,10 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Ty<RustInterner<'tcx>>> for Ty<'tcx> {
                 apply(chalk_ir::TypeName::Tuple(substs.len()), substs.lower_into(interner))
             }
             Projection(proj) => TyData::Alias(proj.lower_into(interner)).intern(interner),
+            UnnormalizedProjection(proj) => apply(
+                chalk_ir::TypeName::AssociatedType(chalk_ir::AssocTypeId(proj.item_def_id)),
+                proj.substs.lower_into(interner),
+            ),
             Opaque(def_id, substs) => {
                 TyData::Alias(chalk_ir::AliasTy::Opaque(chalk_ir::OpaqueTy {
                     opaque_ty_id: chalk_ir::OpaqueTyId(def_id),

@@ -740,7 +740,8 @@ impl<'tcx> ty::TyS<'tcx> {
             | ty::Opaque(..)
             | ty::Param(_)
             | ty::Placeholder(_)
-            | ty::Projection(_) => false,
+            | ty::Projection(_)
+            | ty::UnnormalizedProjection(_) => false,
         }
     }
 
@@ -818,7 +819,13 @@ impl<'tcx> ty::TyS<'tcx> {
             //
             // FIXME(ecstaticmorse): Maybe we should `bug` here? This should probably only be
             // called for known, fully-monomorphized types.
-            Projection(_) | Opaque(..) | Param(_) | Bound(..) | Placeholder(_) | Infer(_) => false,
+            Projection(_)
+            | UnnormalizedProjection(_)
+            | Opaque(..)
+            | Param(_)
+            | Bound(..)
+            | Placeholder(_)
+            | Infer(_) => false,
 
             Foreign(_) | GeneratorWitness(..) | Error(_) => false,
         }
@@ -1130,6 +1137,7 @@ pub fn needs_drop_components(
         // These require checking for `Copy` bounds or `Adt` destructors.
         ty::Adt(..)
         | ty::Projection(..)
+        | ty::UnnormalizedProjection(..)
         | ty::Param(_)
         | ty::Bound(..)
         | ty::Placeholder(..)

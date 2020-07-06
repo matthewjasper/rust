@@ -118,7 +118,12 @@ impl<'cx, 'tcx> WritebackCx<'cx, 'tcx> {
 
     fn write_ty_to_tables(&mut self, hir_id: hir::HirId, ty: Ty<'tcx>) {
         debug!("write_ty_to_tables({:?}, {:?})", hir_id, ty);
-        assert!(!ty.needs_infer() && !ty.has_placeholders() && !ty.has_free_regions());
+        assert!(
+            !ty.needs_infer()
+                && !ty.has_placeholders()
+                && !ty.has_free_regions()
+                && !ty.has_unnormalized_projections()
+        );
         self.tables.node_types_mut().insert(hir_id, ty);
     }
 

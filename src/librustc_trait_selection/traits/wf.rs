@@ -491,7 +491,7 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
                     // Simple cases that are WF if their type args are WF.
                 }
 
-                ty::Projection(data) => {
+                ty::Projection(data) | ty::UnnormalizedProjection(data) => {
                     walker.skip_current_subtree(); // Subtree handled by compute_projection.
                     self.compute_projection(data);
                 }

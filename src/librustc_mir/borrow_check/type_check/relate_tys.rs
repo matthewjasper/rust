@@ -1,8 +1,9 @@
-use rustc_infer::infer::nll_relate::{NormalizationStrategy, TypeRelating, TypeRelatingDelegate};
-use rustc_infer::infer::{InferCtxt, NLLRegionVariableOrigin};
+use rustc_infer::infer::nll_relate::{TypeRelating, TypeRelatingDelegate};
+use rustc_infer::infer::{InferCtxt, InferOk, NLLRegionVariableOrigin};
+use rustc_infer::traits::{Obligation, ObligationCause, PredicateObligation};
 use rustc_middle::mir::ConstraintCategory;
 use rustc_middle::ty::relate::TypeRelation;
-use rustc_middle::ty::{self, Const, Ty};
+use rustc_middle::ty::{self, Const, ToPredicate, Ty};
 use rustc_trait_selection::traits::query::Fallible;
 
 use crate::borrow_check::constraints::OutlivesConstraint;
@@ -18,26 +19,30 @@ use crate::borrow_check::type_check::{BorrowCheckContext, Locations};
 /// variables, but not the type `b`.
 pub(super) fn relate_types<'tcx>(
     infcx: &InferCtxt<'_, 'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
     a: Ty<'tcx>,
     v: ty::Variance,
     b: Ty<'tcx>,
     locations: Locations,
     category: ConstraintCategory,
     borrowck_context: Option<&mut BorrowCheckContext<'_, 'tcx>>,
-) -> Fallible<()> {
+) -> Fallible<InferOk<'tcx, ()>> {
     debug!("relate_types(a={:?}, v={:?}, b={:?}, locations={:?})", a, v, b, locations);
-    TypeRelating::new(
+
+    let mut relating = TypeRelating::new(
         infcx,
-        NllTypeRelatingDelegate::new(infcx, borrowck_context, locations, category),
+        NllTypeRelatingDelegate::new(infcx, param_env, borrowck_context, locations, category),
         v,
-    )
-    .relate(a, b)?;
-    Ok(())
+    );
+    relating.relate(a, b)?;
+    Ok(InferOk { obligations: relating.delegate().nested_obligations, value: () })
 }
 
 struct NllTypeRelatingDelegate<'me, 'bccx, 'tcx> {
     infcx: &'me InferCtxt<'me, 'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
     borrowck_context: Option<&'me mut BorrowCheckContext<'bccx, 'tcx>>,
+    nested_obligations: Vec<PredicateObligation<'tcx>>,
 
     /// Where (and why) is this relation taking place?
     locations: Locations,
@@ -49,11 +54,19 @@ struct NllTypeRelatingDelegate<'me, 'bccx, 'tcx> {
 impl NllTypeRelatingDelegate<'me, 'bccx, 'tcx> {
     fn new(
         infcx: &'me InferCtxt<'me, 'tcx>,
+        param_env: ty::ParamEnv<'tcx>,
         borrowck_context: Option<&'me mut BorrowCheckContext<'bccx, 'tcx>>,
         locations: Locations,
         category: ConstraintCategory,
     ) -> Self {
-        Self { infcx, borrowck_context, locations, category }
+        Self {
+            infcx,
+            param_env,
+            borrowck_context,
+            locations,
+            category,
+            nested_obligations: Vec::new(),
+        }
     }
 }
 
@@ -99,12 +112,30 @@ impl TypeRelatingDelegate<'tcx> for NllTypeRelatingDelegate<'_, '_, 'tcx> {
         }
     }
 
-    // We don't have to worry about the equality of consts during borrow checking
-    // as consts always have a static lifetime.
-    fn const_equate(&mut self, _a: &'tcx Const<'tcx>, _b: &'tcx Const<'tcx>) {}
+    fn param_env(&self) -> ty::ParamEnv<'tcx> {
+        self.param_env
+    }
 
-    fn normalization() -> NormalizationStrategy {
-        NormalizationStrategy::Eager
+    fn const_equate(&mut self, a: &'tcx Const<'tcx>, b: &'tcx Const<'tcx>) {
+        self.nested_obligations.push(Obligation {
+            cause: ObligationCause::dummy(),
+            param_env: self.param_env,
+            predicate: ty::PredicateKind::ConstEquate(a, b).to_predicate(self.infcx.tcx),
+            recursion_depth: 0,
+        });
+    }
+
+    fn push_projection_predicate(&mut self, projection_ty: ty::ProjectionTy<'tcx>, ty: Ty<'tcx>) {
+        self.nested_obligations.push(Obligation {
+            cause: ObligationCause::dummy(),
+            param_env: self.param_env,
+            predicate: ty::PredicateKind::Projection(ty::Binder::dummy(ty::ProjectionPredicate {
+                projection_ty,
+                ty,
+            }))
+            .to_predicate(self.infcx.tcx),
+            recursion_depth: 0,
+        })
     }
 
     fn forbid_inference_vars() -> bool {

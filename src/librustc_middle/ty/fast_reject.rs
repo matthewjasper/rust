@@ -90,18 +90,15 @@ pub fn simplify_type(
         ty::Never => Some(NeverSimplifiedType),
         ty::Tuple(ref tys) => Some(TupleSimplifiedType(tys.len())),
         ty::FnPtr(ref f) => Some(FunctionSimplifiedType(f.skip_binder().inputs().len())),
-        ty::Projection(_) | ty::Param(_) => {
+        ty::Param(_) => {
             if can_simplify_params {
-                // In normalized types, projections don't unify with
-                // anything. when lazy normalization happens, this
-                // will change. It would still be nice to have a way
-                // to deal with known-not-to-unify-with-anything
-                // projections (e.g., the likes of <__S as Encoder>::Error).
                 Some(ParameterSimplifiedType)
             } else {
                 None
             }
         }
+        ty::Projection(_) | ty::UnnormalizedProjection(_) => None,
+        // TODO: Lazy normalization for opaque types.
         ty::Opaque(def_id, _) => Some(OpaqueSimplifiedType(def_id)),
         ty::Foreign(def_id) => Some(ForeignSimplifiedType(def_id)),
         ty::Placeholder(..) | ty::Bound(..) | ty::Infer(_) | ty::Error(_) => None,

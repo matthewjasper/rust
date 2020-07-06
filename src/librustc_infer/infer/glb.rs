@@ -116,6 +116,14 @@ impl<'combine, 'infcx, 'tcx> LatticeDir<'infcx, 'tcx> for Glb<'combine, 'infcx, 
         sub.relate(v, b)?;
         Ok(())
     }
+
+    fn add_projection_equate_obligation(
+        &mut self,
+        projection_ty: ty::ProjectionTy<'tcx>,
+        ty: Ty<'tcx>,
+    ) {
+        self.fields.add_projection_equate_obligation(projection_ty, ty);
+    }
 }
 
 impl<'tcx> ConstEquateRelation<'tcx> for Glb<'_, '_, 'tcx> {

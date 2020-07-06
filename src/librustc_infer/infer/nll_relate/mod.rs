@@ -26,17 +26,11 @@ use crate::infer::InferCtxt;
 use crate::infer::{ConstVarValue, ConstVariableValue};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::ty::error::TypeError;
-use rustc_middle::ty::fold::{TypeFoldable, TypeVisitor};
+use rustc_middle::ty::fold::{TypeFoldable, TypeFolder, TypeVisitor};
 use rustc_middle::ty::relate::{self, Relate, RelateResult, TypeRelation};
 use rustc_middle::ty::subst::GenericArg;
 use rustc_middle::ty::{self, InferConst, Ty, TyCtxt};
 use std::fmt::Debug;
-
-#[derive(PartialEq)]
-pub enum NormalizationStrategy {
-    Lazy,
-    Eager,
-}
 
 pub struct TypeRelating<'me, 'tcx, D>
 where
@@ -78,7 +72,11 @@ pub trait TypeRelatingDelegate<'tcx> {
     /// delegate.
     fn push_outlives(&mut self, sup: ty::Region<'tcx>, sub: ty::Region<'tcx>);
 
+    fn param_env(&self) -> ty::ParamEnv<'tcx>;
+
     fn const_equate(&mut self, a: &'tcx ty::Const<'tcx>, b: &'tcx ty::Const<'tcx>);
+
+    fn push_projection_predicate(&mut self, projection_ty: ty::ProjectionTy<'tcx>, ty: Ty<'tcx>);
 
     /// Creates a new universe index. Used when instantiating placeholders.
     fn create_next_universe(&mut self) -> ty::UniverseIndex;
@@ -110,9 +108,6 @@ pub trait TypeRelatingDelegate<'tcx> {
     /// relate `Foo<'?0>` with `Foo<'a>` (and probably add an outlives
     /// relation stating that `'?0: 'a`).
     fn generalize_existential(&mut self, universe: ty::UniverseIndex) -> ty::Region<'tcx>;
-
-    /// Define the normalization strategy to use, eager or lazy.
-    fn normalization() -> NormalizationStrategy;
 
     /// Enables some optimizations if we do not expect inference variables
     /// in the RHS of the relation.
@@ -224,6 +219,16 @@ where
         scope.map[br]
     }
 
+    /// Returns a TyFolder that will eagerly replace escaping bound regions
+    /// with their instantiated version.
+    fn lookup_bound_region_folder(&mut self, for_a: bool) -> LookupBoundRegionFolder<'_, 'tcx> {
+        LookupBoundRegionFolder {
+            bound_depth: ty::INNERMOST,
+            scopes: if for_a { &self.a_scopes } else { &self.b_scopes },
+            tcx: self.infcx.tcx,
+        }
+    }
+
     /// If `r` is a bound region, find the scope in which it is bound
     /// (from `scopes`) and return the value that we instantiated it
     /// with. Otherwise just return `r`.
@@ -259,8 +264,9 @@ where
     ///   `ProjectionEq(projection = ?U)`, `ProjectionEq(other_projection = ?U)`.
     fn relate_projection_ty(
         &mut self,
-        projection_ty: ty::ProjectionTy<'tcx>,
+        mut projection_ty: ty::ProjectionTy<'tcx>,
         value_ty: Ty<'tcx>,
+        projection_is_a: bool,
     ) -> Ty<'tcx> {
         use crate::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
         use rustc_span::DUMMY_SP;
@@ -271,12 +277,19 @@ where
                     kind: TypeVariableOriginKind::MiscVariable,
                     span: DUMMY_SP,
                 });
-                self.relate_projection_ty(projection_ty, var);
-                self.relate_projection_ty(other_projection_ty, var);
+                self.relate_projection_ty(projection_ty, var, projection_is_a);
+                self.relate_projection_ty(other_projection_ty, var, !projection_is_a);
                 var
             }
 
-            _ => bug!("should never be invoked with eager normalization"),
+            _ => {
+                if projection_ty.has_escaping_bound_vars() {
+                    projection_ty = projection_ty
+                        .fold_with(&mut self.lookup_bound_region_folder(projection_is_a));
+                }
+                self.delegate.push_projection_predicate(projection_ty, value_ty);
+                value_ty
+            }
         }
     }
 
@@ -301,16 +314,16 @@ where
     fn relate_ty_var<PAIR: VidValuePair<'tcx>>(
         &mut self,
         pair: PAIR,
+        var_is_a: bool,
     ) -> RelateResult<'tcx, Ty<'tcx>> {
-        debug!("relate_ty_var({:?})", pair);
+        debug!("relate_ty_var({:?}, var_is_a={})", pair, var_is_a);
 
         let vid = pair.vid();
         let value_ty = pair.value_ty();
 
         // FIXME(invariance) -- this logic assumes invariance, but that is wrong.
         // This only presently applies to chalk integration, as NLL
-        // doesn't permit type variables to appear on both sides (and
-        // doesn't use lazy norm).
+        // doesn't permit type variables to appear on both sides.
         match value_ty.kind {
             ty::Infer(ty::TyVar(value_vid)) => {
                 // Two type variables: just equate them.
@@ -318,8 +331,12 @@ where
                 return Ok(value_ty);
             }
 
-            ty::Projection(projection_ty) if D::normalization() == NormalizationStrategy::Lazy => {
-                return Ok(self.relate_projection_ty(projection_ty, self.infcx.tcx.mk_ty_var(vid)));
+            ty::Projection(projection_ty) => {
+                return Ok(self.relate_projection_ty(
+                    projection_ty,
+                    self.infcx.tcx.mk_ty_var(vid),
+                    !var_is_a,
+                ));
             }
 
             _ => (),
@@ -370,6 +387,10 @@ where
         };
 
         generalizer.relate(value, value)
+    }
+
+    pub fn delegate(self) -> D {
+        self.delegate
     }
 }
 
@@ -481,7 +502,7 @@ where
 
     // FIXME(oli-obk): not sure how to get the correct ParamEnv
     fn param_env(&self) -> ty::ParamEnv<'tcx> {
-        ty::ParamEnv::empty()
+        self.delegate.param_env()
     }
 
     fn tag(&self) -> &'static str {
@@ -537,22 +558,18 @@ where
                     // Forbid inference variables in the RHS.
                     bug!("unexpected inference var {:?}", b)
                 } else {
-                    self.relate_ty_var((a, vid))
+                    self.relate_ty_var((a, vid), false)
                 }
             }
 
-            (&ty::Infer(ty::TyVar(vid)), _) => self.relate_ty_var((vid, b)),
+            (&ty::Infer(ty::TyVar(vid)), _) => self.relate_ty_var((vid, b), true),
 
-            (&ty::Projection(projection_ty), _)
-                if D::normalization() == NormalizationStrategy::Lazy =>
-            {
-                Ok(self.relate_projection_ty(projection_ty, b))
+            (&ty::Projection(projection_ty), _) => {
+                Ok(self.relate_projection_ty(projection_ty, b, true))
             }
 
-            (_, &ty::Projection(projection_ty))
-                if D::normalization() == NormalizationStrategy::Lazy =>
-            {
-                Ok(self.relate_projection_ty(projection_ty, a))
+            (_, &ty::Projection(projection_ty)) => {
+                Ok(self.relate_projection_ty(projection_ty, a, false))
             }
 
             _ => {
@@ -1012,5 +1029,52 @@ where
         let result = self.relate(a.skip_binder(), a.skip_binder())?;
         self.first_free_index.shift_out(1);
         Ok(ty::Binder::bind(result))
+    }
+}
+
+struct LookupBoundRegionFolder<'a, 'tcx> {
+    tcx: TyCtxt<'tcx>,
+    scopes: &'a [BoundRegionScope<'tcx>],
+    bound_depth: ty::DebruijnIndex,
+}
+
+impl<'tcx> TypeFolder<'tcx> for LookupBoundRegionFolder<'_, 'tcx> {
+    fn tcx<'a>(&'a self) -> TyCtxt<'tcx> {
+        self.tcx
+    }
+
+    fn fold_binder<T>(&mut self, t: &ty::Binder<T>) -> ty::Binder<T>
+    where
+        T: TypeFoldable<'tcx>,
+    {
+        self.bound_depth.shift_in(1);
+        let folded = t.super_fold_with(self);
+        self.bound_depth.shift_out(1);
+        folded
+    }
+
+    fn fold_ty(&mut self, t: Ty<'tcx>) -> Ty<'tcx> {
+        if t.has_vars_bound_at_or_above(self.bound_depth) { t.super_fold_with(self) } else { t }
+    }
+
+    fn fold_region(&mut self, r: ty::Region<'tcx>) -> ty::Region<'tcx> {
+        match *r {
+            ty::ReLateBound(db, br) if db >= self.bound_depth => {
+                let debruijn_index = db.shifted_out_to_binder(self.bound_depth);
+                // The debruijn index is a "reverse index" into the
+                // scopes listing. So when we have INNERMOST (0), we
+                // want the *last* scope pushed, and so forth.
+                let scope = &self.scopes[self.scopes.len() - debruijn_index.index() - 1];
+
+                // Find this bound region in that scope to map to a
+                // particular region.
+                scope.map[&br]
+            }
+            _ => r,
+        }
+    }
+
+    fn fold_const(&mut self, c: &'tcx ty::Const<'tcx>) -> &'tcx ty::Const<'tcx> {
+        c.super_fold_with(self)
     }
 }

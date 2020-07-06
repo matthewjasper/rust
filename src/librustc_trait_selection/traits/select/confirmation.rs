@@ -288,26 +288,24 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
         // First, create the substitutions by matching the impl again,
         // this time not in a probe.
-        self.infcx.commit_unconditionally(|_| {
-            let substs = self.rematch_impl(impl_def_id, obligation);
-            debug!("confirm_impl_candidate: substs={:?}", substs);
-            let cause = obligation.derived_cause(ImplDerivedObligation);
-            ensure_sufficient_stack(|| {
-                self.vtable_impl(
-                    impl_def_id,
-                    substs,
-                    cause,
-                    obligation.recursion_depth + 1,
-                    obligation.param_env,
-                )
-            })
+        let substs = self.rematch_impl(impl_def_id, obligation);
+        debug!("confirm_impl_candidate: substs={:?}", substs);
+        let cause = obligation.derived_cause(ImplDerivedObligation);
+        ensure_sufficient_stack(|| {
+            self.vtable_impl(
+                impl_def_id,
+                substs,
+                cause,
+                obligation.recursion_depth + 1,
+                obligation.param_env,
+            )
         })
     }
 
     fn vtable_impl(
         &mut self,
         impl_def_id: DefId,
-        mut substs: Normalized<'tcx, SubstsRef<'tcx>>,
+        mut substs: InferOk<'tcx, SubstsRef<'tcx>>,
         cause: ObligationCause<'tcx>,
         recursion_depth: usize,
         param_env: ty::ParamEnv<'tcx>,
@@ -335,9 +333,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // relying on projections in the impl-trait-ref.
         //
         // e.g., `impl<U: Tr, V: Iterator<Item=U>> Foo<<U as Tr>::T> for V`
-        impl_obligations.append(&mut substs.obligations);
+        substs.obligations.append(&mut impl_obligations);
 
-        ImplSourceUserDefinedData { impl_def_id, substs: substs.value, nested: impl_obligations }
+        ImplSourceUserDefinedData { impl_def_id, substs: substs.value, nested: substs.obligations }
     }
 
     fn confirm_object_candidate(

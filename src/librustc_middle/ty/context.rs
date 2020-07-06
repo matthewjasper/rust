@@ -1914,6 +1914,7 @@ impl<'tcx> TyCtxt<'tcx> {
             Param,
             Infer,
             Projection,
+            UnnormalizedProjection,
             Opaque,
             Foreign
         );
@@ -2303,6 +2304,15 @@ impl<'tcx> TyCtxt<'tcx> {
     #[inline]
     pub fn mk_projection(self, item_def_id: DefId, substs: SubstsRef<'tcx>) -> Ty<'tcx> {
         self.mk_ty(Projection(ProjectionTy { item_def_id, substs }))
+    }
+
+    #[inline]
+    pub fn mk_unnormalized_projection(
+        self,
+        item_def_id: DefId,
+        substs: SubstsRef<'tcx>,
+    ) -> Ty<'tcx> {
+        self.mk_ty(UnnormalizedProjection(ProjectionTy { item_def_id, substs }))
     }
 
     #[inline]

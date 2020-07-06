@@ -538,7 +538,12 @@ pub trait PrettyPrinter<'tcx>:
             ty::Foreign(def_id) => {
                 p!(print_def_path(def_id, &[]));
             }
-            ty::Projection(ref data) => p!(print(data)),
+            ty::UnnormalizedProjection(ref data) if self.tcx().sess.verbose() => {
+                p!(write("unnormalized("));
+                p!(print(data));
+                p!(write(")"));
+            }
+            ty::Projection(ref data) | ty::UnnormalizedProjection(ref data) => p!(print(data)),
             ty::Placeholder(placeholder) => p!(write("Placeholder({:?})", placeholder)),
             ty::Opaque(def_id, substs) => {
                 // FIXME(eddyb) print this with `print_def_path`.

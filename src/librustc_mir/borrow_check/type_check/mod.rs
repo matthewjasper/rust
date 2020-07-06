@@ -1107,15 +1107,30 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         locations: Locations,
         category: ConstraintCategory,
     ) -> Fallible<()> {
-        relate_tys::relate_types(
-            self.infcx,
-            a,
-            v,
-            b,
-            locations,
-            category,
-            Some(self.borrowck_context),
-        )
+        let infcx = self.infcx;
+        // TODO: Use `type_op::Eq` and `type_op::Sub`?
+        let relate_op = CustomTypeOp::new(
+            |infcx| {
+                relate_tys::relate_types(
+                    infcx,
+                    self.param_env,
+                    a,
+                    v,
+                    b,
+                    locations,
+                    category,
+                    Some(self.borrowck_context),
+                )
+            },
+            || "relate_types".to_string(),
+        );
+        let ((), opt_data) = type_op::TypeOp::fully_perform(relate_op, infcx)?;
+
+        if let Some(data) = opt_data {
+            self.push_region_constraints(locations, category, &data);
+        }
+
+        Ok(())
     }
 
     fn sub_types(

@@ -374,10 +374,8 @@ impl<'a, 'b, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'b, 'tcx> {
             }
 
             &ty::PredicateKind::RegionOutlives(binder) => {
-                match infcx.region_outlives_predicate(&obligation.cause, binder) {
-                    Ok(()) => ProcessResult::Changed(vec![]),
-                    Err(_) => ProcessResult::Error(CodeSelectionError(Unimplemented)),
-                }
+                infcx.region_outlives_predicate(&obligation.cause, binder);
+                ProcessResult::Changed(vec![])
             }
 
             ty::PredicateKind::TypeOutlives(ref binder) => {
@@ -434,7 +432,14 @@ impl<'a, 'b, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'b, 'tcx> {
                         ProcessResult::Unchanged
                     }
                     Ok(Some(os)) => ProcessResult::Changed(mk_pending(os)),
-                    Err(e) => ProcessResult::Error(CodeProjectionError(e)),
+                    Err(e) => {
+                        debug!(
+                            "selecting projection `{:?}` at depth {} yielded Err({:?})",
+                            data, obligation.recursion_depth, e
+                        );
+
+                        ProcessResult::Error(CodeProjectionError(e))
+                    }
                 }
             }
 

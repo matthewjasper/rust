@@ -39,6 +39,12 @@ pub trait LatticeDir<'f, 'tcx>: TypeRelation<'tcx> {
     // relates `v` to `a` first, which may help us to avoid unnecessary
     // type variable obligations. See caller for details.
     fn relate_bound(&mut self, v: Ty<'tcx>, a: Ty<'tcx>, b: Ty<'tcx>) -> RelateResult<'tcx, ()>;
+
+    fn add_projection_equate_obligation(
+        &mut self,
+        projection_ty: ty::ProjectionTy<'tcx>,
+        ty: Ty<'tcx>,
+    );
 }
 
 pub fn super_lattice_tys<'a, 'tcx: 'a, L>(
@@ -59,6 +65,23 @@ where
     let a = infcx.inner.borrow_mut().type_variables().replace_if_possible(a);
     let b = infcx.inner.borrow_mut().type_variables().replace_if_possible(b);
     match (&a.kind, &b.kind) {
+        (&ty::Projection(a_proj), _) => {
+            let var = this.infcx().next_ty_var(TypeVariableOrigin {
+                kind: TypeVariableOriginKind::MiscVariable,
+                span: this.cause().span,
+            });
+            this.add_projection_equate_obligation(a_proj, var);
+            super_lattice_tys(this, var, b)
+        }
+
+        (_, &ty::Projection(b_proj)) => {
+            let var = this.infcx().next_ty_var(TypeVariableOrigin {
+                kind: TypeVariableOriginKind::MiscVariable,
+                span: this.cause().span,
+            });
+            this.add_projection_equate_obligation(b_proj, var);
+            super_lattice_tys(this, a, var)
+        }
         // If one side is known to be a variable and one is not,
         // create a variable (`v`) to represent the LUB. Make sure to
         // relate `v` to the non-type-variable first (by passing it

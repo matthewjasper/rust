@@ -1285,7 +1285,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
         let tcx = self.infcx.tcx;
         let (def_id, substs) = match placeholder_trait_predicate.trait_ref.self_ty().kind {
-            ty::Projection(ref data) => (data.item_def_id, data.substs),
+            ty::Projection(ref data) | ty::UnnormalizedProjection(ref data) => {
+                (data.item_def_id, data.substs)
+            }
             ty::Opaque(def_id, substs) => (def_id, substs),
             _ => {
                 span_bug!(
@@ -1344,6 +1346,34 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                     this.evaluate_predicates_recursively(stack.list(), obligations.into_iter())
                 }
                 Err(()) => Ok(EvaluatedToErr),
+            }
+        })
+    }
+
+    pub(super) fn evaluate_where_clause_projection(
+        &mut self,
+        obligation: &project::ProjectionTyObligation<'tcx>,
+        obligation_trait_ref: &ty::TraitRef<'tcx>,
+        where_clause_projection: ty::PolyProjectionPredicate<'tcx>,
+    ) -> Result<EvaluationResult, OverflowError> {
+        self.evaluation_probe(|this| {
+            // FIXME(generic_associated_types): Compare the whole projection_ty
+            let obligation_poly_trait_ref = obligation_trait_ref.to_poly_trait_ref();
+            let where_clause_poly_trait_ref =
+                where_clause_projection.to_poly_trait_ref(this.infcx.tcx);
+            match this
+                .infcx
+                .at(&obligation.cause, obligation.param_env)
+                .sup(obligation_poly_trait_ref, where_clause_poly_trait_ref)
+            {
+                Ok(InferOk { obligations, value: () }) => {
+                    let pec = &ProvisionalEvaluationCache::default();
+                    this.evaluate_predicates_recursively(
+                        TraitObligationStackList::empty(pec),
+                        obligations.into_iter(),
+                    )
+                }
+                Err(_err) => Ok(EvaluatedToErr),
             }
         })
     }
@@ -1569,7 +1599,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 ))
             }
 
-            ty::Projection(_) | ty::Param(_) | ty::Opaque(..) => None,
+            ty::Projection(_) | ty::UnnormalizedProjection(_) | ty::Param(_) | ty::Opaque(..) => {
+                None
+            }
             ty::Infer(ty::TyVar(_)) => Ambiguous,
 
             ty::Placeholder(..)
@@ -1631,7 +1663,11 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 Where(ty::Binder::bind(substs.as_closure().upvar_tys().collect()))
             }
 
-            ty::Adt(..) | ty::Projection(..) | ty::Param(..) | ty::Opaque(..) => {
+            ty::Adt(..)
+            | ty::Projection(..)
+            | ty::UnnormalizedProjection(..)
+            | ty::Param(..)
+            | ty::Opaque(..) => {
                 // Fallback to whatever user-defined impls exist in this case.
                 None
             }
@@ -1681,6 +1717,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             | ty::Param(..)
             | ty::Foreign(..)
             | ty::Projection(..)
+            | ty::UnnormalizedProjection(..)
             | ty::Bound(..)
             | ty::Infer(ty::TyVar(_) | ty::FreshTy(_) | ty::FreshIntTy(_) | ty::FreshFloatTy(_)) => {
                 bug!("asked to assemble constituent types of unexpected type: {:?}", t);
@@ -1795,7 +1832,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         &mut self,
         impl_def_id: DefId,
         obligation: &TraitObligation<'tcx>,
-    ) -> Normalized<'tcx, SubstsRef<'tcx>> {
+    ) -> InferOk<'tcx, SubstsRef<'tcx>> {
         match self.match_impl(impl_def_id, obligation) {
             Ok(substs) => substs,
             Err(()) => {
@@ -1812,7 +1849,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         &mut self,
         impl_def_id: DefId,
         obligation: &TraitObligation<'tcx>,
-    ) -> Result<Normalized<'tcx, SubstsRef<'tcx>>, ()> {
+    ) -> Result<InferOk<'tcx, SubstsRef<'tcx>>, ()> {
         let impl_trait_ref = self.tcx().impl_trait_ref(impl_def_id).unwrap();
 
         // Before we create the substitutions and everything, first
@@ -1830,17 +1867,6 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
         let impl_trait_ref = impl_trait_ref.subst(self.tcx(), impl_substs);
 
-        let Normalized { value: impl_trait_ref, obligations: mut nested_obligations } =
-            ensure_sufficient_stack(|| {
-                project::normalize_with_depth(
-                    self,
-                    obligation.param_env,
-                    obligation.cause.clone(),
-                    obligation.recursion_depth + 1,
-                    &impl_trait_ref,
-                )
-            });
-
         debug!(
             "match_impl(impl_def_id={:?}, obligation={:?}, \
              impl_trait_ref={:?}, placeholder_obligation_trait_ref={:?})",
@@ -1852,7 +1878,6 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             .at(&obligation.cause, obligation.param_env)
             .eq(placeholder_obligation_trait_ref, impl_trait_ref)
             .map_err(|e| debug!("match_impl: failed eq_trait_refs due to `{}`", e))?;
-        nested_obligations.extend(obligations);
 
         if !self.intercrate
             && self.tcx().impl_polarity(impl_def_id) == ty::ImplPolarity::Reservation
@@ -1862,7 +1887,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         }
 
         debug!("match_impl: success impl_substs={:?}", impl_substs);
-        Ok(Normalized { value: impl_substs, obligations: nested_obligations })
+        Ok(InferOk { value: impl_substs, obligations })
     }
 
     fn fast_reject_trait_refs(

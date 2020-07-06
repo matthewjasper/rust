@@ -304,6 +304,7 @@ impl<'infcx, 'tcx> CombineFields<'infcx, 'tcx> {
         self.infcx.inner.borrow_mut().type_variables().instantiate(b_vid, b_ty);
 
         if needs_wf {
+            // TODO: Use with_depth
             self.obligations.push(Obligation::new(
                 self.trace.cause.clone(),
                 self.param_env,
@@ -391,6 +392,20 @@ impl<'infcx, 'tcx> CombineFields<'infcx, 'tcx> {
         Ok(Generalization { ty, needs_wf })
     }
 
+    pub fn add_projection_equate_obligation(
+        &mut self,
+        projection_ty: ty::ProjectionTy<'tcx>,
+        ty: Ty<'tcx>,
+    ) {
+        let predicate = ty::Binder::dummy(ty::ProjectionPredicate { projection_ty, ty });
+        // TODO: Use with_depth
+        self.obligations.push(Obligation::new(
+            self.trace.cause.clone(),
+            self.param_env,
+            predicate.to_predicate(self.tcx()),
+        ));
+    }
+
     pub fn add_const_equate_obligation(
         &mut self,
         a_is_expected: bool,
@@ -402,6 +417,7 @@ impl<'infcx, 'tcx> CombineFields<'infcx, 'tcx> {
         } else {
             ty::PredicateKind::ConstEquate(b, a)
         };
+        // TODO: Use with_depth
         self.obligations.push(Obligation::new(
             self.trace.cause.clone(),
             self.param_env,

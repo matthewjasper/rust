@@ -1245,7 +1245,8 @@ impl<'tcx> LayoutCx<'tcx, TyCtxt<'tcx>> {
                 bug!("Layout::compute: unexpected type `{}`", ty)
             }
 
-            ty::Param(_) | ty::Error(_) => {
+            // TODO: Does normalize_erasing_regions return `UnnormalizedProjection`?
+            ty::UnnormalizedProjection(_) | ty::Param(_) | ty::Error(_) => {
                 return Err(LayoutError::Unknown(ty));
             }
         })
@@ -2138,6 +2139,7 @@ where
             }
 
             ty::Projection(_)
+            | ty::UnnormalizedProjection(_)
             | ty::Bound(..)
             | ty::Placeholder(..)
             | ty::Opaque(..)

@@ -21,13 +21,11 @@ mod structural_match;
 mod util;
 pub mod wf;
 
-use crate::infer::outlives::env::OutlivesEnvironment;
-use crate::infer::{InferCtxt, RegionckMode, TyCtxtInferExt};
-use crate::traits::error_reporting::InferCtxtExt as _;
+use crate::infer::{InferCtxt, TyCtxtInferExt};
 use crate::traits::query::evaluate_obligation::InferCtxtExt as _;
-use rustc_errors::ErrorReported;
 use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
+use rustc_middle::traits::Reveal;
 use rustc_middle::ty::fold::TypeFoldable;
 use rustc_middle::ty::subst::{InternalSubsts, SubstsRef};
 use rustc_middle::ty::{
@@ -198,195 +196,22 @@ pub fn type_known_to_meet_bound_modulo_regions<'a, 'tcx>(
     }
 }
 
-fn do_normalize_predicates<'tcx>(
+/// Elaborates a list of predicates to form a parameter environment.
+pub fn mk_param_env<'tcx>(
     tcx: TyCtxt<'tcx>,
-    region_context: DefId,
-    cause: ObligationCause<'tcx>,
-    elaborated_env: ty::ParamEnv<'tcx>,
-    predicates: Vec<ty::Predicate<'tcx>>,
-) -> Result<Vec<ty::Predicate<'tcx>>, ErrorReported> {
-    debug!(
-        "do_normalize_predicates(predicates={:?}, region_context={:?}, cause={:?})",
-        predicates, region_context, cause,
-    );
-    let span = cause.span;
-    tcx.infer_ctxt().enter(|infcx| {
-        // FIXME. We should really... do something with these region
-        // obligations. But this call just continues the older
-        // behavior (i.e., doesn't cause any new bugs), and it would
-        // take some further refactoring to actually solve them. In
-        // particular, we would have to handle implied bounds
-        // properly, and that code is currently largely confined to
-        // regionck (though I made some efforts to extract it
-        // out). -nmatsakis
-        //
-        // @arielby: In any case, these obligations are checked
-        // by wfcheck anyway, so I'm not sure we have to check
-        // them here too, and we will remove this function when
-        // we move over to lazy normalization *anyway*.
-        let fulfill_cx = FulfillmentContext::new_ignoring_regions();
-        let predicates =
-            match fully_normalize(&infcx, fulfill_cx, cause, elaborated_env, &predicates) {
-                Ok(predicates) => predicates,
-                Err(errors) => {
-                    infcx.report_fulfillment_errors(&errors, None, false);
-                    return Err(ErrorReported);
-                }
-            };
-
-        debug!("do_normalize_predictes: normalized predicates = {:?}", predicates);
-
-        // We can use the `elaborated_env` here; the region code only
-        // cares about declarations like `'a: 'b`.
-        let outlives_env = OutlivesEnvironment::new(elaborated_env);
-
-        infcx.resolve_regions_and_report_errors(
-            region_context,
-            &outlives_env,
-            RegionckMode::default(),
-        );
-
-        let predicates = match infcx.fully_resolve(&predicates) {
-            Ok(predicates) => predicates,
-            Err(fixup_err) => {
-                // If we encounter a fixup error, it means that some type
-                // variable wound up unconstrained. I actually don't know
-                // if this can happen, and I certainly don't expect it to
-                // happen often, but if it did happen it probably
-                // represents a legitimate failure due to some kind of
-                // unconstrained variable, and it seems better not to ICE,
-                // all things considered.
-                tcx.sess.span_err(span, &fixup_err.to_string());
-                return Err(ErrorReported);
-            }
-        };
-        if predicates.needs_infer() {
-            tcx.sess.delay_span_bug(span, "encountered inference variables after `fully_resolve`");
-            Err(ErrorReported)
-        } else {
-            Ok(predicates)
-        }
-    })
-}
-
-// FIXME: this is gonna need to be removed ...
-/// Normalizes the parameter environment, reporting errors if they occur.
-pub fn normalize_param_env_or_error<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    region_context: DefId,
-    unnormalized_env: ty::ParamEnv<'tcx>,
-    cause: ObligationCause<'tcx>,
+    predicates: &[ty::Predicate<'tcx>],
+    item_id: Option<DefId>,
 ) -> ty::ParamEnv<'tcx> {
-    // I'm not wild about reporting errors here; I'd prefer to
-    // have the errors get reported at a defined place (e.g.,
-    // during typeck). Instead I have all parameter
-    // environments, in effect, going through this function
-    // and hence potentially reporting errors. This ensures of
-    // course that we never forget to normalize (the
-    // alternative seemed like it would involve a lot of
-    // manual invocations of this fn -- and then we'd have to
-    // deal with the errors at each of those sites).
-    //
-    // In any case, in practice, typeck constructs all the
-    // parameter environments once for every fn as it goes,
-    // and errors will get reported then; so after typeck we
-    // can be sure that no errors should occur.
+    debug!("mk_param_env(predicates={:?}, item_id={:?})", predicates, item_id);
 
-    debug!(
-        "normalize_param_env_or_error(region_context={:?}, unnormalized_env={:?}, cause={:?})",
-        region_context, unnormalized_env, cause
+    let elaborated_predicates = tcx.mk_predicates(
+        util::elaborate_predicates(tcx, predicates.iter().copied())
+            .map(|obligation| obligation.predicate),
     );
 
-    let mut predicates: Vec<_> =
-        util::elaborate_predicates(tcx, unnormalized_env.caller_bounds.into_iter())
-            .map(|obligation| obligation.predicate)
-            .collect();
+    debug!("mk_param_env: elaborated_predicates={:?}", elaborated_predicates);
 
-    debug!("normalize_param_env_or_error: elaborated-predicates={:?}", predicates);
-
-    let elaborated_env = ty::ParamEnv::new(
-        tcx.intern_predicates(&predicates),
-        unnormalized_env.reveal,
-        unnormalized_env.def_id,
-    );
-
-    // HACK: we are trying to normalize the param-env inside *itself*. The problem is that
-    // normalization expects its param-env to be already normalized, which means we have
-    // a circularity.
-    //
-    // The way we handle this is by normalizing the param-env inside an unnormalized version
-    // of the param-env, which means that if the param-env contains unnormalized projections,
-    // we'll have some normalization failures. This is unfortunate.
-    //
-    // Lazy normalization would basically handle this by treating just the
-    // normalizing-a-trait-ref-requires-itself cycles as evaluation failures.
-    //
-    // Inferred outlives bounds can create a lot of `TypeOutlives` predicates for associated
-    // types, so to make the situation less bad, we normalize all the predicates *but*
-    // the `TypeOutlives` predicates first inside the unnormalized parameter environment, and
-    // then we normalize the `TypeOutlives` bounds inside the normalized parameter environment.
-    //
-    // This works fairly well because trait matching  does not actually care about param-env
-    // TypeOutlives predicates - these are normally used by regionck.
-    let outlives_predicates: Vec<_> = predicates
-        .drain_filter(|predicate| match predicate.kind() {
-            ty::PredicateKind::TypeOutlives(..) => true,
-            _ => false,
-        })
-        .collect();
-
-    debug!(
-        "normalize_param_env_or_error: predicates=(non-outlives={:?}, outlives={:?})",
-        predicates, outlives_predicates
-    );
-    let non_outlives_predicates = match do_normalize_predicates(
-        tcx,
-        region_context,
-        cause.clone(),
-        elaborated_env,
-        predicates,
-    ) {
-        Ok(predicates) => predicates,
-        // An unnormalized env is better than nothing.
-        Err(ErrorReported) => {
-            debug!("normalize_param_env_or_error: errored resolving non-outlives predicates");
-            return elaborated_env;
-        }
-    };
-
-    debug!("normalize_param_env_or_error: non-outlives predicates={:?}", non_outlives_predicates);
-
-    // Not sure whether it is better to include the unnormalized TypeOutlives predicates
-    // here. I believe they should not matter, because we are ignoring TypeOutlives param-env
-    // predicates here anyway. Keeping them here anyway because it seems safer.
-    let outlives_env: Vec<_> =
-        non_outlives_predicates.iter().chain(&outlives_predicates).cloned().collect();
-    let outlives_env =
-        ty::ParamEnv::new(tcx.intern_predicates(&outlives_env), unnormalized_env.reveal, None);
-    let outlives_predicates = match do_normalize_predicates(
-        tcx,
-        region_context,
-        cause,
-        outlives_env,
-        outlives_predicates,
-    ) {
-        Ok(predicates) => predicates,
-        // An unnormalized env is better than nothing.
-        Err(ErrorReported) => {
-            debug!("normalize_param_env_or_error: errored resolving outlives predicates");
-            return elaborated_env;
-        }
-    };
-    debug!("normalize_param_env_or_error: outlives predicates={:?}", outlives_predicates);
-
-    let mut predicates = non_outlives_predicates;
-    predicates.extend(outlives_predicates);
-    debug!("normalize_param_env_or_error: final predicates={:?}", predicates);
-    ty::ParamEnv::new(
-        tcx.intern_predicates(&predicates),
-        unnormalized_env.reveal,
-        unnormalized_env.def_id,
-    )
+    ty::ParamEnv::new(elaborated_predicates, Reveal::UserFacing, item_id)
 }
 
 pub fn fully_normalize<'a, 'tcx, T>(

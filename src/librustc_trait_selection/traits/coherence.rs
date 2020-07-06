@@ -515,12 +515,14 @@ fn ty_is_non_local_constructor(ty: Ty<'_>, in_crate: InCrate) -> Option<Ty<'_>> 
         | ty::Param(..)
         | ty::Projection(..) => Some(ty),
 
-        ty::Placeholder(..) | ty::Bound(..) | ty::Infer(..) => match in_crate {
-            InCrate::Local => Some(ty),
-            // The inference variable might be unified with a local
-            // type in that remote crate.
-            InCrate::Remote => None,
-        },
+        ty::Placeholder(..) | ty::UnnormalizedProjection(..) | ty::Bound(..) | ty::Infer(..) => {
+            match in_crate {
+                InCrate::Local => Some(ty),
+                // The inference variable might be unified with a local
+                // type in that remote crate.
+                InCrate::Remote => None,
+            }
+        }
 
         ty::Adt(def, _) => {
             if def_id_is_local(def.did, in_crate) {

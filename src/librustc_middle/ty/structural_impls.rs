@@ -902,6 +902,9 @@ impl<'tcx> TypeFoldable<'tcx> for Ty<'tcx> {
             ty::GeneratorWitness(types) => ty::GeneratorWitness(types.fold_with(folder)),
             ty::Closure(did, substs) => ty::Closure(did, substs.fold_with(folder)),
             ty::Projection(ref data) => ty::Projection(data.fold_with(folder)),
+            ty::UnnormalizedProjection(ref data) => {
+                ty::UnnormalizedProjection(data.fold_with(folder))
+            }
             ty::Opaque(did, substs) => ty::Opaque(did, substs.fold_with(folder)),
 
             ty::Bool
@@ -943,6 +946,7 @@ impl<'tcx> TypeFoldable<'tcx> for Ty<'tcx> {
             ty::GeneratorWitness(ref types) => types.visit_with(visitor),
             ty::Closure(_did, ref substs) => substs.visit_with(visitor),
             ty::Projection(ref data) => data.visit_with(visitor),
+            ty::UnnormalizedProjection(ref data) => data.visit_with(visitor),
             ty::Opaque(_, ref substs) => substs.visit_with(visitor),
 
             ty::Bool

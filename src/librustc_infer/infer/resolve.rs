@@ -181,13 +181,17 @@ struct FullTypeResolver<'a, 'tcx> {
     err: Option<FixupError<'tcx>>,
 }
 
+const NEEDS_FOLD_FLAGS: ty::TypeFlags = ty::TypeFlags::from_bits_truncate(
+    ty::TypeFlags::NEEDS_INFER.bits() | ty::TypeFlags::HAS_TY_UNNORMALIZED_PROJECTION.bits(),
+);
+
 impl<'a, 'tcx> TypeFolder<'tcx> for FullTypeResolver<'a, 'tcx> {
     fn tcx<'b>(&'b self) -> TyCtxt<'tcx> {
         self.infcx.tcx
     }
 
     fn fold_ty(&mut self, t: Ty<'tcx>) -> Ty<'tcx> {
-        if !t.needs_infer() {
+        if !t.has_type_flags(NEEDS_FOLD_FLAGS) {
             t // micro-optimize -- if there is nothing in this type that this fold affects...
         } else {
             let t = self.infcx.shallow_resolve(t);
@@ -206,6 +210,9 @@ impl<'a, 'tcx> TypeFolder<'tcx> for FullTypeResolver<'a, 'tcx> {
                 }
                 ty::Infer(_) => {
                     bug!("Unexpected type in full type resolver: {:?}", t);
+                }
+                ty::UnnormalizedProjection(data) => {
+                    self.tcx().mk_projection(data.item_def_id, data.substs.fold_with(self))
                 }
                 _ => t.super_fold_with(self),
             }
@@ -226,7 +233,7 @@ impl<'a, 'tcx> TypeFolder<'tcx> for FullTypeResolver<'a, 'tcx> {
     }
 
     fn fold_const(&mut self, c: &'tcx ty::Const<'tcx>) -> &'tcx ty::Const<'tcx> {
-        if !c.needs_infer() {
+        if !c.has_type_flags(NEEDS_FOLD_FLAGS) {
             c // micro-optimize -- if there is nothing in this const that this fold affects...
         } else {
             let c = self.infcx.shallow_resolve(c);
