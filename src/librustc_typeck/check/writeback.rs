@@ -122,7 +122,7 @@ impl<'cx, 'tcx> WritebackCx<'cx, 'tcx> {
             !ty.needs_infer()
                 && !ty.has_placeholders()
                 && !ty.has_free_regions()
-                && !ty.has_unnormalized_projections()
+                && !ty.has_ty_assoc()
         );
         self.tables.node_types_mut().insert(hir_id, ty);
     }

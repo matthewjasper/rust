@@ -4,11 +4,11 @@ error[E0053]: method `jumbo` has an incompatible type for trait
 LL |     fn jumbo(&self, x: &usize) -> usize;
    |     ------------------------------------ type in trait
 ...
-LL |     unsafe fn jumbo(&self, x: &usize) { *self + *x; }
+LL |     unsafe fn jumbo(&self, x: &usize) {
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected normal fn, found unsafe fn
    |
-   = note: expected fn pointer `fn(&usize, &usize) -> usize`
-              found fn pointer `unsafe fn(&usize, &usize)`
+   = note: expected fn pointer `for<'r, 's> fn(&'r usize, &'s usize) -> usize`
+              found fn pointer `unsafe for<'r, 's> fn(&'r usize, &'s usize)`
 
 error: aborting due to previous error
 

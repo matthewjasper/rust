@@ -17,7 +17,10 @@ fn main() {
         // Causes ICE
         impl Deref for Thing {
             //~^ ERROR E0046
-            fn deref(&self) -> i8 { self.0 }
+            fn deref(&self) -> i8 {
+                //~^ ERROR E0053
+                self.0
+            }
         }
 
         let thing = Thing(72);

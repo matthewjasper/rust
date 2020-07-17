@@ -45,16 +45,13 @@ LL |     async fn associated();
    = note: consider using the `async-trait` crate: https://crates.io/crates/async-trait
 
 error[E0053]: method `associated` has an incompatible type for trait
-  --> $DIR/issue-70736-async-fn-no-body-def-collector.rs:15:26
+  --> $DIR/issue-70736-async-fn-no-body-def-collector.rs:15:5
    |
 LL |     async fn associated();
-   |                          - type in trait
+   |     ---------------------- type in trait
 ...
 LL |     async fn associated();
-   |                          ^
-   |                          |
-   |                          the `Output` of this `async fn`'s found opaque type
-   |                          expected `()`, found opaque type
+   |     ^^^^^^^^^^^^^^^^^^^^^^ expected `()`, found opaque type
    |
    = note: expected fn pointer `fn()`
               found fn pointer `fn() -> impl std::future::Future`

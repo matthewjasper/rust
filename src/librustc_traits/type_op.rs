@@ -116,26 +116,21 @@ impl AscribeUserTypeCx<'me, 'tcx> {
         let ty = tcx.type_of(def_id);
         let ty = self.subst(ty, substs);
         debug!("relate_type_and_user_type: ty of def-id is {:?}", ty);
+        // TODO: Only normalize when proving the Well-Formed predicate
         let ty = self.normalize(ty);
 
         self.relate(mir_ty, Variance::Invariant, ty)?;
 
         // Prove the predicates coming along with `def_id`.
-        //
-        // Also, normalize the `instantiated_predicates`
-        // because otherwise we wind up with duplicate "type
-        // outlives" error messages.
         let instantiated_predicates =
             self.tcx().predicates_of(def_id).instantiate(self.tcx(), substs);
         for instantiated_predicate in instantiated_predicates.predicates {
-            let instantiated_predicate = self.normalize(instantiated_predicate);
             self.prove_predicate(instantiated_predicate);
         }
 
         if let Some(UserSelfTy { impl_def_id, self_ty }) = user_self_ty {
             let impl_self_ty = self.tcx().type_of(impl_def_id);
             let impl_self_ty = self.subst(impl_self_ty, &substs);
-            let impl_self_ty = self.normalize(impl_self_ty);
 
             self.relate(self_ty, Variance::Invariant, impl_self_ty)?;
 
@@ -148,13 +143,8 @@ impl AscribeUserTypeCx<'me, 'tcx> {
         // prove that `ty` is well-formed -- this is because
         // the WF of `ty` is predicated on the substs being
         // well-formed, and we haven't proven *that*. We don't
-        // want to prove the WF of types from  `substs` directly because they
+        // want to prove the WF of types from `substs` directly because they
         // haven't been normalized.
-        //
-        // FIXME(nmatsakis): Well, perhaps we should normalize
-        // them?  This would only be relevant if some input
-        // type were ill-formed but did not appear in `ty`,
-        // which...could happen with normalization...
         self.prove_predicate(ty::PredicateKind::WellFormed(ty.into()).to_predicate(self.tcx()));
         Ok(())
     }

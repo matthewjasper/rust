@@ -31,6 +31,21 @@ help: consider further restricting the associated type
 LL | pub trait Foo where <<Self as Foo>::Out as Baz>::Assoc: std::default::Default { type Out: Baz<Assoc: Default>; }
    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error: aborting due to 2 previous errors
+error[E0271]: type mismatch resolving `<<Self as Foo>::Out as Baz>::Assoc == <Self as Foo>::Out`
+  --> $DIR/bounds-on-assoc-in-trait.rs:37:17
+   |
+LL | pub trait Foo { type Out: Baz<Assoc: Default>; }
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected Foo::Out, found Baz::Assoc
+   | 
+  ::: $SRC_DIR/libcore/marker.rs:LL:COL
+   |
+LL | pub trait Sized {
+   | --------------- required by this bound in `std::marker::Sized`
+   |
+   = note: expected associated type `<Self as Foo>::Out`
+              found associated type `<<Self as Foo>::Out as Baz>::Assoc`
 
-For more information about this error, try `rustc --explain E0277`.
+error: aborting due to 3 previous errors
+
+Some errors have detailed explanations: E0271, E0277.
+For more information about an error, try `rustc --explain E0271`.

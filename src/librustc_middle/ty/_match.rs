@@ -67,6 +67,8 @@ impl TypeRelation<'tcx> for Match<'tcx> {
             return Ok(a);
         }
 
+        // TODO: Projections can be unified with lazy norm, should we return Ok
+        // if either side is a projection?
         match (&a.kind, &b.kind) {
             (
                 _,

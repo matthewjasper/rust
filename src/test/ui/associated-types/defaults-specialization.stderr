@@ -7,32 +7,28 @@ LL | #![feature(associated_type_defaults, specialization)]
    = note: `#[warn(incomplete_features)]` on by default
    = note: see issue #31844 <https://github.com/rust-lang/rust/issues/31844> for more information
 
-error[E0053]: method `make` has an incompatible type for trait
-  --> $DIR/defaults-specialization.rs:19:18
+error[E0271]: type mismatch resolving `<A<T> as Tr>::Ty == u8`
+  --> $DIR/defaults-specialization.rs:19:5
    |
-LL |     fn make() -> Self::Ty {
-   |                  -------- type in trait
-...
 LL |     fn make() -> u8 { 0 }
-   |                  ^^ expected associated type, found `u8`
+   |     ^^^^^^^^^^^^^^^ expected associated type, found `u8`
    |
-   = note: expected fn pointer `fn() -> <A<T> as Tr>::Ty`
-              found fn pointer `fn() -> u8`
+   = note: expected associated type `<A<T> as Tr>::Ty`
+                         found type `u8`
+   = note: the requirement `<A<T> as Tr>::Ty == u8` appears on the impl method but not on the corresponding trait method
 
-error[E0053]: method `make` has an incompatible type for trait
-  --> $DIR/defaults-specialization.rs:35:18
+error[E0271]: type mismatch resolving `<B<T> as Tr>::Ty == bool`
+  --> $DIR/defaults-specialization.rs:35:5
    |
-LL |     fn make() -> Self::Ty {
-   |                  -------- type in trait
-...
 LL |     default type Ty = bool;
    |     ----------------------- expected this associated type
 LL | 
 LL |     fn make() -> bool { true }
-   |                  ^^^^ expected associated type, found `bool`
+   |     ^^^^^^^^^^^^^^^^^ expected associated type, found `bool`
    |
-   = note: expected fn pointer `fn() -> <B<T> as Tr>::Ty`
-              found fn pointer `fn() -> bool`
+   = note: expected associated type `<B<T> as Tr>::Ty`
+                         found type `bool`
+   = note: the requirement `<B<T> as Tr>::Ty == bool` appears on the impl method but not on the corresponding trait method
 
 error[E0308]: mismatched types
   --> $DIR/defaults-specialization.rs:10:9
@@ -141,5 +137,5 @@ LL |     fn make() -> Self::Ty {
 
 error: aborting due to 9 previous errors; 1 warning emitted
 
-Some errors have detailed explanations: E0053, E0308.
-For more information about an error, try `rustc --explain E0053`.
+Some errors have detailed explanations: E0271, E0308.
+For more information about an error, try `rustc --explain E0271`.

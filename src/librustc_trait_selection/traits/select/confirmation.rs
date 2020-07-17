@@ -9,17 +9,16 @@
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_hir::lang_items;
 use rustc_index::bit_set::GrowableBitSet;
+use rustc_infer::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
 use rustc_infer::infer::{self, InferOk};
 use rustc_middle::ty::subst::{GenericArg, GenericArgKind, Subst, SubstsRef};
 use rustc_middle::ty::{self, Ty};
 use rustc_middle::ty::{ToPolyTraitRef, ToPredicate, WithConstness};
 use rustc_span::def_id::DefId;
 
-use crate::traits::project::{self, normalize_with_depth};
 use crate::traits::select::TraitObligationExt;
 use crate::traits::util;
 use crate::traits::util::{closure_trait_ref_and_return_type, predicate_for_trait_def};
-use crate::traits::Normalized;
 use crate::traits::OutputTypeParameterMismatch;
 use crate::traits::Selection;
 use crate::traits::TraitNotObjectSafe;
@@ -117,6 +116,11 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 let data = self.confirm_builtin_unsize_candidate(obligation)?;
                 Ok(ImplSourceBuiltin(data))
             }
+
+            NormalizeCandidate => {
+                let data = self.confirm_normalize_candidate(obligation);
+                Ok(ImplSourceParam(data))
+            }
         }
     }
 
@@ -130,7 +134,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 .unwrap_or_else(|| bug!("Can't find selected projection candidate"));
             let mut obligations = self
                 .infcx
-                .at(&obligation.cause, obligation.param_env)
+                .at_obligation(obligation)
                 .sup(obligation.predicate.to_poly_trait_ref(), candidate)
                 .map(|InferOk { obligations, .. }| obligations)
                 .unwrap_or_else(|_| {
@@ -142,13 +146,45 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 });
             // Require that the projection is well-formed.
             let self_ty = obligation.predicate.skip_binder().self_ty();
-            obligations.push(Obligation::new(
+            obligations.push(Obligation::with_depth(
                 obligation.cause.clone(),
+                obligation.recursion_depth + 1,
                 obligation.param_env,
                 ty::PredicateKind::WellFormed(self_ty.into()).to_predicate(self.tcx()),
             ));
             obligations
         })
+    }
+
+    fn confirm_normalize_candidate(
+        &mut self,
+        obligation: &TraitObligation<'tcx>,
+    ) -> Vec<PredicateObligation<'tcx>> {
+        let placeholder_predicate =
+            self.infcx.replace_bound_vars_with_placeholders(&obligation.predicate);
+
+        // (Ab)use lazy norm to get the caller to normalize.
+        let self_var = self.infcx.next_ty_var(TypeVariableOrigin {
+            kind: TypeVariableOriginKind::MiscVariable,
+            span: obligation.cause.span,
+        });
+        let InferOk { value: (), mut obligations } = self
+            .infcx
+            .at_obligation(obligation)
+            .eq(placeholder_predicate.self_ty(), self_var)
+            .unwrap_or_else(|_| {
+                bug!("Unable to equate projection and fresh type variable?");
+            });
+        obligations.push(predicate_for_trait_def(
+            self.tcx(),
+            obligation.param_env,
+            obligation.cause.clone(),
+            placeholder_predicate.def_id(),
+            obligation.recursion_depth + 1,
+            self_var,
+            &placeholder_predicate.trait_ref.substs[1..],
+        ));
+        obligations
     }
 
     fn confirm_param_candidate(
@@ -254,20 +290,16 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 nested,
             );
 
-            let trait_obligations: Vec<PredicateObligation<'_>> =
-                self.infcx.commit_unconditionally(|_| {
-                    let poly_trait_ref = obligation.predicate.to_poly_trait_ref();
-                    let trait_ref =
-                        self.infcx.replace_bound_vars_with_placeholders(&poly_trait_ref);
-                    let cause = obligation.derived_cause(ImplDerivedObligation);
-                    self.impl_or_trait_obligations(
-                        cause,
-                        obligation.recursion_depth + 1,
-                        obligation.param_env,
-                        trait_def_id,
-                        &trait_ref.substs,
-                    )
-                });
+            let poly_trait_ref = obligation.predicate.to_poly_trait_ref();
+            let trait_ref = self.infcx.replace_bound_vars_with_placeholders(&poly_trait_ref);
+            let cause = obligation.derived_cause(ImplDerivedObligation);
+            let trait_obligations: Vec<PredicateObligation<'_>> = self.impl_or_trait_obligations(
+                cause,
+                obligation.recursion_depth + 1,
+                obligation.param_env,
+                trait_def_id,
+                &trait_ref.substs,
+            );
 
             // Adds the predicates from the trait.  Note that this contains a `Self: Trait`
             // predicate as usual.  It won't have any effect since auto traits are coinductive.
@@ -305,7 +337,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     fn vtable_impl(
         &mut self,
         impl_def_id: DefId,
-        mut substs: InferOk<'tcx, SubstsRef<'tcx>>,
+        substs: InferOk<'tcx, SubstsRef<'tcx>>,
         cause: ObligationCause<'tcx>,
         recursion_depth: usize,
         param_env: ty::ParamEnv<'tcx>,
@@ -314,13 +346,15 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             "vtable_impl(impl_def_id={:?}, substs={:?}, recursion_depth={})",
             impl_def_id, substs, recursion_depth,
         );
+        let resolved_substs = self.infcx.resolve_vars_if_possible(&substs.value);
+        let mut resolved_obligations = self.infcx.resolve_vars_if_possible(&substs.obligations);
 
         let mut impl_obligations = self.impl_or_trait_obligations(
             cause,
             recursion_depth,
             param_env,
             impl_def_id,
-            &substs.value,
+            &resolved_substs,
         );
 
         debug!(
@@ -333,9 +367,13 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // relying on projections in the impl-trait-ref.
         //
         // e.g., `impl<U: Tr, V: Iterator<Item=U>> Foo<<U as Tr>::T> for V`
-        substs.obligations.append(&mut impl_obligations);
+        resolved_obligations.append(&mut impl_obligations);
 
-        ImplSourceUserDefinedData { impl_def_id, substs: substs.value, nested: substs.obligations }
+        ImplSourceUserDefinedData {
+            impl_def_id,
+            substs: resolved_substs,
+            nested: resolved_obligations,
+        }
     }
 
     fn confirm_object_candidate(
@@ -415,8 +453,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                                 infer_projection.ty,
                                 &substs,
                             );
-                            Obligation::new(
+                            Obligation::with_depth(
                                 obligation.cause.clone(),
+                                obligation.recursion_depth + 1,
                                 obligation.param_env.clone(),
                                 subst_bound,
                             )
@@ -451,22 +490,11 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         )
         .map_bound(|(trait_ref, _)| trait_ref);
 
-        let Normalized { value: trait_ref, mut obligations } = ensure_sufficient_stack(|| {
-            project::normalize_with_depth(
-                self,
-                obligation.param_env,
-                obligation.cause.clone(),
-                obligation.recursion_depth + 1,
-                &trait_ref,
-            )
-        });
-
-        obligations.extend(self.confirm_poly_trait_refs(
-            obligation.cause.clone(),
-            obligation.param_env,
+        let obligations = self.confirm_poly_trait_refs(
+            obligation,
             obligation.predicate.to_poly_trait_ref(),
             trait_ref,
-        )?);
+        )?;
         Ok(ImplSourceFnPointerData { fn_ty: self_ty, nested: obligations })
     }
 
@@ -477,28 +505,25 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     ) -> ImplSourceTraitAliasData<'tcx, PredicateObligation<'tcx>> {
         debug!("confirm_trait_alias_candidate({:?}, {:?})", obligation, alias_def_id);
 
-        self.infcx.commit_unconditionally(|_| {
-            let predicate =
-                self.infcx().replace_bound_vars_with_placeholders(&obligation.predicate);
-            let trait_ref = predicate.trait_ref;
-            let trait_def_id = trait_ref.def_id;
-            let substs = trait_ref.substs;
+        let predicate = self.infcx().replace_bound_vars_with_placeholders(&obligation.predicate);
+        let trait_ref = predicate.trait_ref;
+        let trait_def_id = trait_ref.def_id;
+        let substs = trait_ref.substs;
 
-            let trait_obligations = self.impl_or_trait_obligations(
-                obligation.cause.clone(),
-                obligation.recursion_depth,
-                obligation.param_env,
-                trait_def_id,
-                &substs,
-            );
+        let trait_obligations = self.impl_or_trait_obligations(
+            obligation.cause.clone(),
+            obligation.recursion_depth + 1,
+            obligation.param_env,
+            trait_def_id,
+            &substs,
+        );
 
-            debug!(
-                "confirm_trait_alias_candidate: trait_def_id={:?} trait_obligations={:?}",
-                trait_def_id, trait_obligations
-            );
+        debug!(
+            "confirm_trait_alias_candidate: trait_def_id={:?} trait_obligations={:?}",
+            trait_def_id, trait_obligations
+        );
 
-            ImplSourceTraitAliasData { alias_def_id, substs, nested: trait_obligations }
-        })
+        ImplSourceTraitAliasData { alias_def_id, substs, nested: trait_obligations }
     }
 
     fn confirm_generator_candidate(
@@ -518,28 +543,17 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         debug!("confirm_generator_candidate({:?},{:?},{:?})", obligation, generator_def_id, substs);
 
         let trait_ref = self.generator_trait_ref_unnormalized(obligation, substs);
-        let Normalized { value: trait_ref, mut obligations } = ensure_sufficient_stack(|| {
-            normalize_with_depth(
-                self,
-                obligation.param_env,
-                obligation.cause.clone(),
-                obligation.recursion_depth + 1,
-                &trait_ref,
-            )
-        });
 
-        debug!(
-            "confirm_generator_candidate(generator_def_id={:?}, \
-             trait_ref={:?}, obligations={:?})",
-            generator_def_id, trait_ref, obligations
-        );
-
-        obligations.extend(self.confirm_poly_trait_refs(
-            obligation.cause.clone(),
-            obligation.param_env,
+        let obligations = self.confirm_poly_trait_refs(
+            obligation,
             obligation.predicate.to_poly_trait_ref(),
             trait_ref,
-        )?);
+        )?;
+
+        debug!(
+            "confirm_generator_candidate(generator_def_id={:?}, trait_ref={:?})",
+            generator_def_id, trait_ref
+        );
 
         Ok(ImplSourceGeneratorData { generator_def_id, substs, nested: obligations })
     }
@@ -565,38 +579,24 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         };
 
         let trait_ref = self.closure_trait_ref_unnormalized(obligation, substs);
-        let Normalized { value: trait_ref, mut obligations } = ensure_sufficient_stack(|| {
-            normalize_with_depth(
-                self,
-                obligation.param_env,
-                obligation.cause.clone(),
-                obligation.recursion_depth + 1,
-                &trait_ref,
-            )
-        });
+
+        let mut obligations = self.confirm_poly_trait_refs(
+            obligation,
+            obligation.predicate.to_poly_trait_ref(),
+            trait_ref,
+        )?;
 
         debug!(
             "confirm_closure_candidate(closure_def_id={:?}, trait_ref={:?}, obligations={:?})",
             closure_def_id, trait_ref, obligations
         );
 
-        obligations.extend(self.confirm_poly_trait_refs(
+        obligations.push(Obligation::with_depth(
             obligation.cause.clone(),
+            obligation.recursion_depth + 1,
             obligation.param_env,
-            obligation.predicate.to_poly_trait_ref(),
-            trait_ref,
-        )?);
-
-        // FIXME: Chalk
-
-        if !self.tcx().sess.opts.debugging_opts.chalk {
-            obligations.push(Obligation::new(
-                obligation.cause.clone(),
-                obligation.param_env,
-                ty::PredicateKind::ClosureKind(closure_def_id, substs, kind)
-                    .to_predicate(self.tcx()),
-            ));
-        }
+            ty::PredicateKind::ClosureKind(closure_def_id, substs, kind).to_predicate(self.tcx()),
+        ));
 
         Ok(ImplSourceClosureData { closure_def_id, substs, nested: obligations })
     }
@@ -628,13 +628,12 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     /// report an error to the user.
     fn confirm_poly_trait_refs(
         &mut self,
-        obligation_cause: ObligationCause<'tcx>,
-        obligation_param_env: ty::ParamEnv<'tcx>,
+        obligation: &TraitObligation<'tcx>,
         obligation_trait_ref: ty::PolyTraitRef<'tcx>,
         expected_trait_ref: ty::PolyTraitRef<'tcx>,
     ) -> Result<Vec<PredicateObligation<'tcx>>, SelectionError<'tcx>> {
         self.infcx
-            .at(&obligation_cause, obligation_param_env)
+            .at_obligation(obligation)
             .sup(obligation_trait_ref, expected_trait_ref)
             .map(|InferOk { obligations, .. }| obligations)
             .map_err(|e| OutputTypeParameterMismatch(expected_trait_ref, obligation_trait_ref, e))
@@ -674,7 +673,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 // only the **lifetime bound** is changed.
                 let InferOk { obligations, .. } = self
                     .infcx
-                    .at(&obligation.cause, obligation.param_env)
+                    .at_obligation(obligation)
                     .sup(target, source_trait)
                     .map_err(|_| Unimplemented)?;
                 nested.extend(obligations);
@@ -743,11 +742,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
             // `[T; n]` -> `[T]`
             (&ty::Array(a, _), &ty::Slice(b)) => {
-                let InferOk { obligations, .. } = self
-                    .infcx
-                    .at(&obligation.cause, obligation.param_env)
-                    .eq(b, a)
-                    .map_err(|_| Unimplemented)?;
+                let InferOk { obligations, .. } =
+                    self.infcx.at_obligation(obligation).eq(b, a).map_err(|_| Unimplemented)?;
                 nested.extend(obligations);
             }
 
@@ -812,7 +808,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 let new_struct = tcx.mk_adt(def, substs);
                 let InferOk { obligations, .. } = self
                     .infcx
-                    .at(&obligation.cause, obligation.param_env)
+                    .at_obligation(obligation)
                     .eq(target, new_struct)
                     .map_err(|_| Unimplemented)?;
                 nested.extend(obligations);
@@ -844,7 +840,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 );
                 let InferOk { obligations, .. } = self
                     .infcx
-                    .at(&obligation.cause, obligation.param_env)
+                    .at_obligation(obligation)
                     .eq(target, new_tuple)
                     .map_err(|_| Unimplemented)?;
                 nested.extend(obligations);

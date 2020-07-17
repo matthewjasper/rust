@@ -13,10 +13,10 @@ fn a() {
             let closure1 = || {
                 match closure0.take() {
                     Some(c) => {
+                        //~^ ERROR type annotations needed for `std::option::Option<T>`
                         return c();
-                        //~^ ERROR type annotations needed
                     }
-                    None => { }
+                    None => {}
                 }
             };
             closure1();
@@ -26,4 +26,4 @@ fn a() {
     }
 }
 
-fn main() { }
+fn main() {}

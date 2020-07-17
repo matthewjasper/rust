@@ -27,6 +27,7 @@
 
 use super::*;
 
+use crate::traits::Obligation;
 use rustc_middle::ty::relate::{Relate, TypeRelation};
 use rustc_middle::ty::Const;
 
@@ -34,6 +35,7 @@ pub struct At<'a, 'tcx> {
     pub infcx: &'a InferCtxt<'a, 'tcx>,
     pub cause: &'a ObligationCause<'tcx>,
     pub param_env: ty::ParamEnv<'tcx>,
+    pub(super) recursion_depth: usize,
 }
 
 pub struct Trace<'a, 'tcx> {
@@ -49,7 +51,17 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         cause: &'a ObligationCause<'tcx>,
         param_env: ty::ParamEnv<'tcx>,
     ) -> At<'a, 'tcx> {
-        At { infcx: self, cause, param_env }
+        At { infcx: self, cause, param_env, recursion_depth: 0 }
+    }
+
+    #[inline]
+    pub fn at_obligation<T>(&'a self, obligation: &'a Obligation<'tcx, T>) -> At<'a, 'tcx> {
+        At {
+            infcx: self,
+            cause: &obligation.cause,
+            param_env: obligation.param_env,
+            recursion_depth: obligation.recursion_depth + 1,
+        }
     }
 }
 
@@ -193,7 +205,7 @@ impl<'a, 'tcx> Trace<'a, 'tcx> {
         debug!("sub({:?} <: {:?})", a, b);
         let Trace { at, trace, a_is_expected } = self;
         at.infcx.commit_if_ok(|_| {
-            let mut fields = at.infcx.combine_fields(trace, at.param_env);
+            let mut fields = at.infcx.combine_fields(trace, at.recursion_depth, at.param_env);
             fields
                 .sub(a_is_expected)
                 .relate(a, b)
@@ -210,7 +222,7 @@ impl<'a, 'tcx> Trace<'a, 'tcx> {
         debug!("eq({:?} == {:?})", a, b);
         let Trace { at, trace, a_is_expected } = self;
         at.infcx.commit_if_ok(|_| {
-            let mut fields = at.infcx.combine_fields(trace, at.param_env);
+            let mut fields = at.infcx.combine_fields(trace, at.recursion_depth, at.param_env);
             fields
                 .equate(a_is_expected)
                 .relate(a, b)
@@ -225,7 +237,7 @@ impl<'a, 'tcx> Trace<'a, 'tcx> {
         debug!("lub({:?} \\/ {:?})", a, b);
         let Trace { at, trace, a_is_expected } = self;
         at.infcx.commit_if_ok(|_| {
-            let mut fields = at.infcx.combine_fields(trace, at.param_env);
+            let mut fields = at.infcx.combine_fields(trace, at.recursion_depth, at.param_env);
             fields
                 .lub(a_is_expected)
                 .relate(a, b)
@@ -240,7 +252,7 @@ impl<'a, 'tcx> Trace<'a, 'tcx> {
         debug!("glb({:?} /\\ {:?})", a, b);
         let Trace { at, trace, a_is_expected } = self;
         at.infcx.commit_if_ok(|_| {
-            let mut fields = at.infcx.combine_fields(trace, at.param_env);
+            let mut fields = at.infcx.combine_fields(trace, at.recursion_depth, at.param_env);
             fields
                 .glb(a_is_expected)
                 .relate(a, b)

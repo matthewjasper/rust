@@ -8,7 +8,9 @@ use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 use rustc_middle::mir::visit::*;
 use rustc_middle::mir::*;
 use rustc_middle::ty::subst::{Subst, SubstsRef};
-use rustc_middle::ty::{self, ConstKind, Instance, InstanceDef, ParamEnv, Ty, TyCtxt};
+use rustc_middle::ty::{
+    self, ConstKind, Instance, InstanceDef, ParamEnv, Ty, TyCtxt, TypeFoldable,
+};
 use rustc_target::spec::abi::Abi;
 
 use super::simplify::{remove_dead_blocks, CfgSimplifier};
@@ -120,11 +122,9 @@ impl Inliner<'tcx> {
                 };
 
                 let callee_body = if self.consider_optimizing(callsite, callee_body) {
-                    self.tcx.subst_and_normalize_erasing_regions(
-                        &callsite.substs,
-                        param_env,
-                        callee_body,
-                    )
+                    debug_assert!(!callsite.substs.has_escaping_bound_vars());
+                    debug_assert!(!callsite.substs.has_free_regions());
+                    callee_body.subst(self.tcx, &**self.tcx.reset_projections(&callsite.substs))
                 } else {
                     continue;
                 };

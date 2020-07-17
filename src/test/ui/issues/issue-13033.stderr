@@ -7,8 +7,8 @@ LL |     fn bar(&mut self, other: &mut dyn Foo);
 LL |     fn bar(&mut self, other: &dyn Foo) {}
    |                              ^^^^^^^^ types differ in mutability
    |
-   = note: expected fn pointer `fn(&mut Baz, &mut dyn Foo)`
-              found fn pointer `fn(&mut Baz, &dyn Foo)`
+   = note: expected fn pointer `for<'r, 's> fn(&'r mut Baz, &'s mut (dyn Foo + 's))`
+              found fn pointer `for<'r, 's> fn(&'r mut Baz, &'s (dyn Foo + 's))`
 help: consider change the type to match the mutability in trait
    |
 LL |     fn bar(&mut self, other: &mut dyn Foo) {}

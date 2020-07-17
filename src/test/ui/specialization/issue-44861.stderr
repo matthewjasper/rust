@@ -7,6 +7,18 @@ LL |     type Data2: CoerceUnsized<*const [u8]>;
 LL |     default type Data2 = ();
    |     ^^^^^^^^^^^^^^^^^^^^^^^^ the trait `std::ops::CoerceUnsized<*const [u8]>` is not implemented for `()`
 
-error: aborting due to previous error
+error[E0308]: mismatched types
+  --> $DIR/issue-44861.rs:40:5
+   |
+LL | pub fn conv(s: SmartassPtr<()>) -> SmartassPtr<dyn MaybeObjectSafe> {
+   |                                    -------------------------------- expected `SmartassPtr<(dyn MaybeObjectSafe + 'static)>` because of return type
+LL |     s
+   |     ^ expected trait object `dyn MaybeObjectSafe`, found `()`
+   |
+   = note: expected struct `SmartassPtr<(dyn MaybeObjectSafe + 'static)>`
+              found struct `SmartassPtr<()>`
 
-For more information about this error, try `rustc --explain E0277`.
+error: aborting due to 2 previous errors
+
+Some errors have detailed explanations: E0277, E0308.
+For more information about an error, try `rustc --explain E0277`.

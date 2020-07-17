@@ -17,8 +17,9 @@ use rustc_middle::ty::{
 use rustc_session::parse::feature_err;
 use rustc_span::symbol::{sym, Symbol};
 use rustc_span::Span;
+use rustc_trait_selection::infer::InferCtxtExt as _;
 use rustc_trait_selection::opaque_types::may_define_opaque_type;
-use rustc_trait_selection::traits::query::evaluate_obligation::InferCtxtExt;
+use rustc_trait_selection::traits::query::evaluate_obligation::InferCtxtExt as _;
 use rustc_trait_selection::traits::{self, ObligationCause, ObligationCauseCode};
 
 /// Helper type of a temporary returned by `.for_item(...)`.
@@ -1019,7 +1020,7 @@ fn receiver_is_valid<'fcx, 'tcx>(
 ) -> bool {
     let cause = fcx.cause(span, traits::ObligationCauseCode::MethodReceiver);
 
-    let can_eq_self = |ty| fcx.infcx.can_eq(fcx.param_env, self_ty, ty).is_ok();
+    let can_eq_self = |ty| fcx.infcx.can_eq(fcx.param_env, self_ty, ty);
 
     // `self: Self` is always valid.
     if can_eq_self(receiver_ty) {
@@ -1189,7 +1190,6 @@ fn check_false_global_bounds(fcx: &FnCtxt<'_, '_>, span: Span, id: hir::HirId) {
         let pred = obligation.predicate;
         // Match the existing behavior.
         if pred.is_global() && !pred.has_late_bound_regions() {
-            let pred = fcx.normalize_associated_types_in(span, &pred);
             let obligation = traits::Obligation::new(
                 traits::ObligationCause::new(span, id, traits::TrivialBound),
                 empty_env,

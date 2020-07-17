@@ -464,9 +464,9 @@ pub fn super_relate_tys<R: TypeRelation<'tcx>>(
             Ok(tcx.mk_projection(projection_ty.item_def_id, projection_ty.substs))
         }
 
-        (&ty::UnnormalizedProjection(a_data), &ty::UnnormalizedProjection(b_data)) => {
+        (&ty::AssocTy(a_data), &ty::AssocTy(b_data)) => {
             let projection_ty = relation.relate(a_data, b_data)?;
-            Ok(tcx.mk_unnormalized_projection(projection_ty.item_def_id, projection_ty.substs))
+            Ok(tcx.mk_assoc_ty(projection_ty.item_def_id, projection_ty.substs))
         }
 
         (&ty::Opaque(a_def_id, a_substs), &ty::Opaque(b_def_id, b_substs))

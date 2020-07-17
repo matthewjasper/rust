@@ -735,10 +735,12 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
     fn combine_fields(
         &'a self,
         trace: TypeTrace<'tcx>,
+        recursion_depth: usize,
         param_env: ty::ParamEnv<'tcx>,
     ) -> CombineFields<'a, 'tcx> {
         CombineFields {
             infcx: self,
+            recursion_depth,
             trace,
             cause: None,
             param_env,
@@ -901,32 +903,6 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
 
     pub fn add_given(&self, sub: ty::Region<'tcx>, sup: ty::RegionVid) {
         self.inner.borrow_mut().unwrap_region_constraints().add_given(sub, sup);
-    }
-
-    pub fn can_sub<T>(&self, param_env: ty::ParamEnv<'tcx>, a: T, b: T) -> UnitResult<'tcx>
-    where
-        T: at::ToTrace<'tcx>,
-    {
-        let origin = &ObligationCause::dummy();
-        self.probe(|_| {
-            self.at(origin, param_env).sub(a, b).map(|InferOk { obligations: _, .. }| {
-                // Ignore obligations, since we are unrolling
-                // everything anyway.
-            })
-        })
-    }
-
-    pub fn can_eq<T>(&self, param_env: ty::ParamEnv<'tcx>, a: T, b: T) -> UnitResult<'tcx>
-    where
-        T: at::ToTrace<'tcx>,
-    {
-        let origin = &ObligationCause::dummy();
-        self.probe(|_| {
-            self.at(origin, param_env).eq(a, b).map(|InferOk { obligations: _, .. }| {
-                // Ignore obligations, since we are unrolling
-                // everything anyway.
-            })
-        })
     }
 
     pub fn sub_regions(
@@ -1328,8 +1304,21 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         value.fold_with(&mut ShallowResolver { infcx: self })
     }
 
+    /// Returns the lowest `TyVid` that has been equated to `var.
     pub fn root_var(&self, var: ty::TyVid) -> ty::TyVid {
         self.inner.borrow_mut().type_variables().root_var(var)
+    }
+
+    /// Like `root_var`, but works with `Ty<'tcx>`
+    ///
+    /// returns var unchanged if it's not a `TyKind::Infer(TyVar(_))`
+    pub fn root_var_ty(&self, var: Ty<'tcx>) -> Ty<'tcx> {
+        match var.kind {
+            ty::Infer(ty::TyVar(vid)) => {
+                self.tcx.reuse_or_mk_ty(var, ty::Infer(ty::TyVar(self.root_var(vid))))
+            }
+            _ => var,
+        }
     }
 
     /// Where possible, replaces type/const variables in
@@ -1370,6 +1359,21 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         match self.inner.borrow_mut().const_unification_table().probe_value(vid).val {
             ConstVariableValue::Known { value } => Ok(value),
             ConstVariableValue::Unknown { universe } => Err(universe),
+        }
+    }
+
+    pub fn root_var_const(&self, ct: &'tcx ty::Const<'tcx>) -> &'tcx ty::Const<'tcx> {
+        match ct.val {
+            ty::ConstKind::Infer(InferConst::Var(vid)) => self.tcx.reuse_or_mk_const(
+                ct,
+                ty::Const {
+                    ty: ct.ty,
+                    val: ty::ConstKind::Infer(ty::InferConst::Var(
+                        self.inner.borrow_mut().const_unification_table().find(vid),
+                    )),
+                },
+            ),
+            _ => ct,
         }
     }
 
@@ -1560,7 +1564,7 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
                 // Note: if these two lines are combined into one we get
                 // dynamic borrow errors on `self.inner`.
                 let known = self.inner.borrow_mut().type_variables().probe(v).known();
-                known.map(|t| self.shallow_resolve_ty(t)).unwrap_or(typ)
+                known.map(|t| self.shallow_resolve_ty(t)).unwrap_or(self.root_var_ty(typ))
             }
 
             ty::Infer(ty::IntVar(v)) => self
@@ -1583,9 +1587,12 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         }
     }
 
-    /// `ty_or_const_infer_var_changed` is equivalent to one of these two:
-    ///   * `shallow_resolve(ty) != ty` (where `ty.kind = ty::Infer(_)`)
-    ///   * `shallow_resolve(ct) != ct` (where `ct.kind = ty::ConstKind::Infer(_)`)
+    /// `ty_or_const_infer_var_changed` is equivalent to one of these three:
+    ///   * `!shallow_resolve(ty).is_ty_var()` (where `ty.kind = ty::Infer(TyVar(_))`
+    ///   * `shallow_resolve(ty) != ty` (where `ty.kind = ty::Infer(TyInt(_))`
+    ///     or `ty.kind = ty::Infer(TyFloat(_))`)
+    ///   * `!matches!(shallow_resolve(ct).val, ty::ConstKind::Infer(_))` (where
+    ///     `ct.val = ty::ConstKind::Infer(_)`)
     ///
     /// However, `ty_or_const_infer_var_changed` is more efficient. It's always
     /// inlined, despite being large, because it has only two call sites that

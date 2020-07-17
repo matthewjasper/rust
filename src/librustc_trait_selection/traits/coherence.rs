@@ -175,6 +175,8 @@ fn overlap_within_probe(
     // FIXME: the call to `selcx.predicate_may_hold_fatal` above should be ported
     // to the canonical trait query form, `infcx.predicate_may_hold`, once
     // the new system supports intercrate mode (which coherence needs).
+    // FIXME: Why are we checking predicates one at a time?
+    // This forces us to normalize the impl headers eagerly
 
     if let Some(failing_obligation) = opt_failing_obligation {
         debug!("overlap: obligation unsatisfiable {:?}", failing_obligation);
@@ -515,7 +517,7 @@ fn ty_is_non_local_constructor(ty: Ty<'_>, in_crate: InCrate) -> Option<Ty<'_>> 
         | ty::Param(..)
         | ty::Projection(..) => Some(ty),
 
-        ty::Placeholder(..) | ty::UnnormalizedProjection(..) | ty::Bound(..) | ty::Infer(..) => {
+        ty::Placeholder(..) | ty::AssocTy(..) | ty::Bound(..) | ty::Infer(..) => {
             match in_crate {
                 InCrate::Local => Some(ty),
                 // The inference variable might be unified with a local

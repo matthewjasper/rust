@@ -279,9 +279,11 @@ where
                 let subpath = self.elaborator.field_subpath(variant_path, field);
                 let tcx = self.tcx();
 
+                // TODO: Don't normalize?
                 assert_eq!(self.elaborator.param_env().reveal, Reveal::All);
                 let field_ty =
                     tcx.normalize_erasing_regions(self.elaborator.param_env(), f.ty(tcx, substs));
+                let field_ty = tcx.reset_projections(&field_ty);
                 (tcx.mk_place_field(base_place, field, field_ty), subpath)
             })
             .collect()

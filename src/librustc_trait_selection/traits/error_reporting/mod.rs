@@ -10,7 +10,7 @@ use super::{
 
 use crate::infer::error_reporting::{TyCategory, TypeAnnotationNeeded as ErrorCode};
 use crate::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
-use crate::infer::{self, InferCtxt, TyCtxtInferExt};
+use crate::infer::{self, InferCtxt, InferCtxtExt as _, TyCtxtInferExt};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_errors::{pluralize, struct_span_err, Applicability, DiagnosticBuilder, ErrorReported};
 use rustc_hir as hir;
@@ -1086,7 +1086,7 @@ impl<'a, 'tcx> InferCtxtPrivExt<'tcx> for InferCtxt<'a, 'tcx> {
                 // Eventually I'll need to implement param-env-aware
                 // `Γ₁ ⊦ φ₁ => Γ₂ ⊦ φ₂` logic.
                 let param_env = ty::ParamEnv::empty();
-                if self.can_sub(param_env, error, implication).is_ok() {
+                if self.can_sub(param_env, error, implication) {
                     debug!("error_implies: {:?} -> {:?} -> {:?}", cond, error, implication);
                     return true;
                 }
@@ -1243,7 +1243,7 @@ impl<'a, 'tcx> InferCtxtPrivExt<'tcx> for InferCtxt<'a, 'tcx> {
                 ty::Dynamic(..) => Some(8),
                 ty::Closure(..) => Some(9),
                 ty::Tuple(..) => Some(10),
-                ty::UnnormalizedProjection(..) => Some(11),
+                ty::AssocTy(..) => Some(11),
                 ty::Param(..) => Some(12),
                 ty::Opaque(..) => Some(13),
                 ty::Never => Some(14),
@@ -1647,38 +1647,34 @@ impl<'a, 'tcx> InferCtxtPrivExt<'tcx> for InferCtxt<'a, 'tcx> {
             }
 
             fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
-                if let ty::Param(ty::ParamTy { name, .. }) = ty.kind {
-                    let infcx = self.infcx;
-                    self.var_map.entry(ty).or_insert_with(|| {
-                        infcx.next_ty_var(TypeVariableOrigin {
-                            kind: TypeVariableOriginKind::TypeParameterDefinition(name, None),
-                            span: DUMMY_SP,
+                match ty.kind {
+                    ty::Param(ty::ParamTy { name, .. }) => {
+                        let infcx = self.infcx;
+                        self.var_map.entry(ty).or_insert_with(|| {
+                            infcx.next_ty_var(TypeVariableOrigin {
+                                kind: TypeVariableOriginKind::TypeParameterDefinition(name, None),
+                                span: DUMMY_SP,
+                            })
                         })
-                    })
-                } else {
-                    ty.super_fold_with(self)
+                    }
+                    // Allow normalizing projections again.
+                    ty::AssocTy(ref data) => {
+                        let substs = data.substs.fold_with(self);
+                        self.infcx.tcx.mk_projection(data.item_def_id, substs)
+                    }
+                    _ => ty.super_fold_with(self),
                 }
             }
         }
 
         self.probe(|_| {
-            let mut selcx = SelectionContext::new(self);
-
             let cleaned_pred =
                 pred.fold_with(&mut ParamToVarFolder { infcx: self, var_map: Default::default() });
-
-            let cleaned_pred = super::project::normalize(
-                &mut selcx,
-                param_env,
-                ObligationCause::dummy(),
-                &cleaned_pred,
-            )
-            .value;
 
             let obligation = Obligation::new(
                 ObligationCause::dummy(),
                 param_env,
-                cleaned_pred.without_const().to_predicate(selcx.tcx()),
+                cleaned_pred.without_const().to_predicate(self.tcx),
             );
 
             self.predicate_may_hold(&obligation)

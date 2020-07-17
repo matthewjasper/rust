@@ -11,7 +11,9 @@ where
 
 impl<S, T> X<'_, T> for (S,) {
     type U = str;
-    //~^ ERROR the trait bound `for<'b> <(T,) as X<'b, T>>::U: std::clone::Clone` is not satisfied
+    //~^ ERROR overflow evaluating the requirement `T: std::marker::Sized`
+    //~| ERROR the trait bound `str: std::clone::Clone` is not satisfied
+    //~| ERROR overflow evaluating the requirement `(T,): X<\'_, T>`
 }
 
 pub fn main() {

@@ -15,7 +15,10 @@ trait Tr {
 }
 
 // Where-clauses defined on the trait must also be considered
-trait Tr2 where Self::Ty: Clone {
+trait Tr2
+where
+    Self::Ty: Clone,
+{
     type Ty = NotClone;
     //~^ ERROR the trait bound `NotClone: std::clone::Clone` is not satisfied
 }
@@ -42,7 +45,7 @@ trait C where
     bool: IsU8<Self::Assoc>,
 {
     type Assoc = u8;
-    //~^ ERROR the trait bound `u8: IsU8<<Self as C>::Assoc>` is not satisfied
+    //~^ ERROR the trait bound `<Self as C>::Assoc == u8` is not satisfied
 }
 
 // Test that we get all expected errors if that default is unsuitable
@@ -52,7 +55,7 @@ trait D where
     bool: IsU8<Self::Assoc>,
 {
     type Assoc = NotClone;
-    //~^ ERROR the trait bound `NotClone: IsU8<<Self as D>::Assoc>` is not satisfied
+    //~^ ERROR the trait bound `<Self as D>::Assoc == u8` is not satisfied
 }
 
 // Test behavior of the check when defaults refer to other defaults:
@@ -76,7 +79,8 @@ trait Foo25<T: Clone> {
 
 // Adding the `Baz: Clone` bound isn't enough since the default is type
 // parameter `T`, which also might not be `Clone`.
-trait Foo3<T> where
+trait Foo3<T>
+where
     Self::Bar: Clone,
     Self::Baz: Clone,
 {
@@ -87,7 +91,8 @@ trait Foo3<T> where
 
 // This one finally works, with `Clone` bounds on all assoc. types and the type
 // parameter.
-trait Foo4<T> where
+trait Foo4<T>
+where
     T: Clone,
 {
     type Bar: Clone = Vec<Self::Baz>;

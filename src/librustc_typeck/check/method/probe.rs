@@ -913,16 +913,23 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
                     let (fty, _) =
                         self.replace_bound_vars_with_fresh_vars(self.span, infer::FnCall, &fty);
 
+                    let origin = &ObligationCause::dummy();
+
                     if let Some(self_ty) = self_ty {
                         if self
-                            .at(&ObligationCause::dummy(), self.param_env)
-                            .sup(fty.inputs()[0], self_ty)
-                            .is_err()
+                            .at(origin, self.param_env)
+                            .sub(self_ty, fty.inputs()[0])
+                            .map_or(true, |InferOk { obligations, value: () }| {
+                                !obligations.is_empty()
+                            })
                         {
                             return false;
                         }
                     }
-                    self.can_sub(self.param_env, fty.output(), expected).is_ok()
+
+                    self.at(origin, self.param_env)
+                        .sub(fty.output(), expected)
+                        .map_or(false, |InferOk { obligations, value: () }| obligations.is_empty())
                 })
             }
             _ => false,
@@ -1341,7 +1348,6 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
             };
 
             let mut result = ProbeResult::Match;
-            let selcx = &mut traits::SelectionContext::new(self);
             let cause = traits::ObligationCause::misc(self.span, self.body_id);
 
             // If so, impls may carry other conditions (e.g., where
@@ -1354,16 +1360,13 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
                     let impl_def_id = probe.item.container.id();
                     let impl_bounds = self.tcx.predicates_of(impl_def_id);
                     let impl_bounds = impl_bounds.instantiate(self.tcx, substs);
-                    let traits::Normalized { value: impl_bounds, obligations: norm_obligations } =
-                        traits::normalize(selcx, self.param_env, cause.clone(), &impl_bounds);
 
                     // Convert the bounds into obligations.
                     let impl_obligations =
                         traits::predicates_for_generics(cause, self.param_env, impl_bounds);
 
-                    let candidate_obligations = impl_obligations
-                        .chain(norm_obligations.into_iter())
-                        .chain(ref_obligations.iter().cloned());
+                    let candidate_obligations =
+                        impl_obligations.chain(ref_obligations.iter().cloned());
                     // Evaluate those obligations to see if they might possibly hold.
                     for o in candidate_obligations {
                         let o = self.resolve_vars_if_possible(&o);

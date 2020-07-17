@@ -199,7 +199,7 @@ pub fn push_debuginfo_type_name<'tcx>(
         | ty::Infer(_)
         | ty::Placeholder(..)
         | ty::Projection(..)
-        | ty::UnnormalizedProjection(..)
+        | ty::AssocTy(..)
         | ty::Bound(..)
         | ty::Opaque(..)
         | ty::GeneratorWitness(..)

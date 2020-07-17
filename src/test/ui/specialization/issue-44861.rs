@@ -5,7 +5,7 @@
 
 use std::ops::CoerceUnsized;
 
-pub struct SmartassPtr<A: Smartass+?Sized>(A::Data);
+pub struct SmartassPtr<A: Smartass + ?Sized>(A::Data);
 
 pub trait Smartass {
     type Data;
@@ -31,10 +31,12 @@ impl Smartass for dyn MaybeObjectSafe {
     type Data2 = *const [u8; 0];
 }
 
-impl<U: Smartass+?Sized, T: Smartass+?Sized> CoerceUnsized<SmartassPtr<T>> for SmartassPtr<U>
-    where <U as Smartass>::Data: std::ops::CoerceUnsized<<T as Smartass>::Data>
-{}
+impl<U: Smartass + ?Sized, T: Smartass + ?Sized> CoerceUnsized<SmartassPtr<T>> for SmartassPtr<U> where
+    <U as Smartass>::Data: std::ops::CoerceUnsized<<T as Smartass>::Data>
+{
+}
 
 pub fn conv(s: SmartassPtr<()>) -> SmartassPtr<dyn MaybeObjectSafe> {
     s
+    //~^ ERROR mismatched types
 }

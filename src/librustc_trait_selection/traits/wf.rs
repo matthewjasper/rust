@@ -60,11 +60,8 @@ pub fn obligations<'a, 'tcx>(
 
     let mut wf = WfPredicates { infcx, param_env, body_id, span, out: vec![], item: None };
     wf.compute(arg);
-    debug!("wf::obligations({:?}, body_id={:?}) = {:?}", arg, body_id, wf.out);
-
-    let result = wf.normalize();
-    debug!("wf::obligations({:?}, body_id={:?}) ~~> {:?}", arg, body_id, result);
-    Some(result)
+    debug!("wf::obligations({:?}, body_id={:?}) ~~> {:?}", arg, body_id, wf.out);
+    Some(wf.out)
 }
 
 /// Returns the obligations that make this trait reference
@@ -81,7 +78,7 @@ pub fn trait_obligations<'a, 'tcx>(
 ) -> Vec<traits::PredicateObligation<'tcx>> {
     let mut wf = WfPredicates { infcx, param_env, body_id, span, out: vec![], item };
     wf.compute_trait_ref(trait_ref, Elaborate::All);
-    wf.normalize()
+    wf.out
 }
 
 pub fn predicate_obligations<'a, 'tcx>(
@@ -130,7 +127,7 @@ pub fn predicate_obligations<'a, 'tcx>(
         }
     }
 
-    wf.normalize()
+    wf.out
 }
 
 struct WfPredicates<'a, 'tcx> {
@@ -237,31 +234,6 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
 
     fn cause(&self, code: traits::ObligationCauseCode<'tcx>) -> traits::ObligationCause<'tcx> {
         traits::ObligationCause::new(self.span, self.body_id, code)
-    }
-
-    fn normalize(mut self) -> Vec<traits::PredicateObligation<'tcx>> {
-        let cause = self.cause(traits::MiscObligation);
-        let infcx = &mut self.infcx;
-        let param_env = self.param_env;
-        let mut obligations = Vec::with_capacity(self.out.len());
-        for mut obligation in self.out {
-            assert!(!obligation.has_escaping_bound_vars());
-            let mut selcx = traits::SelectionContext::new(infcx);
-            let i = obligations.len();
-            // Don't normalize the whole obligation, the param env is either
-            // already normalized, or we're currently normalizing the
-            // param_env. Either way we should only normalize the predicate.
-            let normalized_predicate = traits::normalize_to(
-                &mut selcx,
-                param_env,
-                cause.clone(),
-                &obligation.predicate,
-                &mut obligations,
-            );
-            obligation.predicate = normalized_predicate;
-            obligations.insert(i, obligation);
-        }
-        obligations
     }
 
     /// Pushes the obligations required for `trait_ref` to be WF into `self.out`.
@@ -491,7 +463,7 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
                     // Simple cases that are WF if their type args are WF.
                 }
 
-                ty::Projection(data) | ty::UnnormalizedProjection(data) => {
+                ty::Projection(data) | ty::AssocTy(data) => {
                     walker.skip_current_subtree(); // Subtree handled by compute_projection.
                     self.compute_projection(data);
                 }

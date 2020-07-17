@@ -959,8 +959,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         };
         if let (Some(a_sig), Some(b_sig)) = (a_sig, b_sig) {
             // The signature must match.
-            let a_sig = self.normalize_associated_types_in(new.span, &a_sig);
-            let b_sig = self.normalize_associated_types_in(new.span, &b_sig);
             let sig = self
                 .at(cause, self.param_env)
                 .trace(prev_ty, new_ty)

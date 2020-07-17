@@ -127,8 +127,8 @@ impl FlagComputation {
                 self.add_projection_ty(data);
             }
 
-            &ty::UnnormalizedProjection(data) => {
-                self.add_flags(TypeFlags::HAS_TY_UNNORMALIZED_PROJECTION);
+            &ty::AssocTy(data) => {
+                self.add_flags(TypeFlags::HAS_TY_ASSOC);
                 self.add_projection_ty(data);
             }
 

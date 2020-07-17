@@ -90,14 +90,14 @@ pub fn simplify_type(
         ty::Never => Some(NeverSimplifiedType),
         ty::Tuple(ref tys) => Some(TupleSimplifiedType(tys.len())),
         ty::FnPtr(ref f) => Some(FunctionSimplifiedType(f.skip_binder().inputs().len())),
-        ty::Param(_) => {
+        ty::Param(_) | ty::AssocTy(_) => {
             if can_simplify_params {
                 Some(ParameterSimplifiedType)
             } else {
                 None
             }
         }
-        ty::Projection(_) | ty::UnnormalizedProjection(_) => None,
+        ty::Projection(_) => None,
         // TODO: Lazy normalization for opaque types.
         ty::Opaque(def_id, _) => Some(OpaqueSimplifiedType(def_id)),
         ty::Foreign(def_id) => Some(ForeignSimplifiedType(def_id)),

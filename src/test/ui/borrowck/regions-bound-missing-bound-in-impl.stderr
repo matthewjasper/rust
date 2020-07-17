@@ -20,39 +20,19 @@ error[E0308]: method not compatible with trait
   --> $DIR/regions-bound-missing-bound-in-impl.rs:27:5
    |
 LL |     fn wrong_bound1<'b,'c,'d:'a+'c>(self, b: Inv<'b>, c: Inv<'c>, d: Inv<'d>) {
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ lifetime mismatch
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ one type is more general than the other
    |
-   = note: expected fn pointer `fn(&'a isize, Inv<'c>, Inv<'c>, Inv<'_>)`
-              found fn pointer `fn(&'a isize, Inv<'_>, Inv<'c>, Inv<'_>)`
-note: the lifetime `'c` as defined on the method body at 27:24...
-  --> $DIR/regions-bound-missing-bound-in-impl.rs:27:24
-   |
-LL |     fn wrong_bound1<'b,'c,'d:'a+'c>(self, b: Inv<'b>, c: Inv<'c>, d: Inv<'d>) {
-   |                        ^^
-note: ...does not necessarily outlive the lifetime `'c` as defined on the method body at 27:24
-  --> $DIR/regions-bound-missing-bound-in-impl.rs:27:24
-   |
-LL |     fn wrong_bound1<'b,'c,'d:'a+'c>(self, b: Inv<'b>, c: Inv<'c>, d: Inv<'d>) {
-   |                        ^^
+   = note: expected fn pointer `for<'c> fn(&'a isize, Inv<'c>, Inv<'c>, Inv<'_>)`
+              found fn pointer `for<'b> fn(&'a isize, Inv<'b>, Inv<'c>, Inv<'_>)`
 
 error[E0308]: method not compatible with trait
   --> $DIR/regions-bound-missing-bound-in-impl.rs:27:5
    |
 LL |     fn wrong_bound1<'b,'c,'d:'a+'c>(self, b: Inv<'b>, c: Inv<'c>, d: Inv<'d>) {
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ lifetime mismatch
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ one type is more general than the other
    |
-   = note: expected fn pointer `fn(&'a isize, Inv<'c>, Inv<'c>, Inv<'_>)`
-              found fn pointer `fn(&'a isize, Inv<'_>, Inv<'c>, Inv<'_>)`
-note: the lifetime `'c` as defined on the method body at 27:24...
-  --> $DIR/regions-bound-missing-bound-in-impl.rs:27:24
-   |
-LL |     fn wrong_bound1<'b,'c,'d:'a+'c>(self, b: Inv<'b>, c: Inv<'c>, d: Inv<'d>) {
-   |                        ^^
-note: ...does not necessarily outlive the lifetime `'c` as defined on the method body at 27:24
-  --> $DIR/regions-bound-missing-bound-in-impl.rs:27:24
-   |
-LL |     fn wrong_bound1<'b,'c,'d:'a+'c>(self, b: Inv<'b>, c: Inv<'c>, d: Inv<'d>) {
-   |                        ^^
+   = note: expected fn pointer `for<'c> fn(&'a isize, Inv<'c>, Inv<'c>, Inv<'_>)`
+              found fn pointer `for<'b> fn(&'a isize, Inv<'b>, Inv<'c>, Inv<'_>)`
 
 error[E0195]: lifetime parameters or bounds on method `wrong_bound2` do not match the trait declaration
   --> $DIR/regions-bound-missing-bound-in-impl.rs:42:20

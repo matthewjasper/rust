@@ -220,10 +220,12 @@ fn insert_required_predicates_to_be_wf<'tcx>(
                 }
             }
 
-            ty::Projection(obj) => {
+            ty::Projection(obj) | ty::AssocTy(obj) => {
                 // This corresponds to `<T as Foo<'a>>::Bar`. In this case, we should use the
                 // explicit predicates as well.
                 debug!("Projection");
+                // FIXME(generic_associated_types) why are we using the
+                // container DefId with the associated type's substs.
                 check_explicit_predicates(
                     tcx,
                     tcx.associated_item(obj.item_def_id).container.id(),

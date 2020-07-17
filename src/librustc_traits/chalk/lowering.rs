@@ -437,7 +437,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Ty<RustInterner<'tcx>>> for Ty<'tcx> {
                 apply(chalk_ir::TypeName::Tuple(substs.len()), substs.lower_into(interner))
             }
             Projection(proj) => TyData::Alias(proj.lower_into(interner)).intern(interner),
-            UnnormalizedProjection(proj) => apply(
+            AssocTy(proj) => apply(
                 chalk_ir::TypeName::AssociatedType(chalk_ir::AssocTypeId(proj.item_def_id)),
                 proj.substs.lower_into(interner),
             ),

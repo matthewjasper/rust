@@ -155,7 +155,21 @@ help: consider further restricting the associated type
 LL | trait _Tr3 where <<Self as _Tr3>::A as std::iter::Iterator>::Item: std::marker::Copy {
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error: aborting due to 17 previous errors
+error[E0271]: type mismatch resolving `<<Self as _Tr3>::A as std::iter::Iterator>::Item == <Self as _Tr3>::A`
+  --> $DIR/feature-gate-associated_type_bounds.rs:16:5
+   |
+LL |     type A: Iterator<Item: Copy>;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected _Tr3::A, found std::iter::Iterator::Item
+   | 
+  ::: $SRC_DIR/libcore/marker.rs:LL:COL
+   |
+LL | pub trait Sized {
+   | --------------- required by this bound in `std::marker::Sized`
+   |
+   = note: expected associated type `<Self as _Tr3>::A`
+              found associated type `<<Self as _Tr3>::A as std::iter::Iterator>::Item`
 
-Some errors have detailed explanations: E0277, E0562, E0658.
-For more information about an error, try `rustc --explain E0277`.
+error: aborting due to 18 previous errors
+
+Some errors have detailed explanations: E0271, E0277, E0562, E0658.
+For more information about an error, try `rustc --explain E0271`.

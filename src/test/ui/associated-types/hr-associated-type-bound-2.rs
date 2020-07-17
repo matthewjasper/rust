@@ -9,13 +9,14 @@ where
 }
 
 impl X<'_> for u32
+//~^ ERROR the trait bound `str: std::clone::Clone` is not satisfied
 where
     for<'b> <Self as X<'b>>::U: Clone,
 {
     type U = str;
+    //~^ ERROR the trait bound `str: std::clone::Clone` is not satisfied
 }
 
 fn main() {
     1u32.f("abc");
-    //~^ ERROR no method named `f` found for type `u32` in the current scope
 }

@@ -1,3 +1,12 @@
+error[E0053]: method `deref` has an incompatible type for trait
+  --> $DIR/issue-24356.rs:20:13
+   |
+LL |             fn deref(&self) -> i8 {
+   |             ^^^^^^^^^^^^^^^^^^^^^ expected reference, found `i8`
+   |
+   = note: expected fn pointer `for<'r> fn(&'r main::Thing) -> &'r <main::Thing as std::ops::Deref>::Target`
+              found fn pointer `for<'r> fn(&'r main::Thing) -> i8`
+
 error[E0046]: not all trait items implemented, missing: `Target`
   --> $DIR/issue-24356.rs:18:9
    |
@@ -6,6 +15,7 @@ LL |         impl Deref for Thing {
    |
    = help: implement the missing item: `type Target = Type;`
 
-error: aborting due to previous error
+error: aborting due to 2 previous errors
 
-For more information about this error, try `rustc --explain E0046`.
+Some errors have detailed explanations: E0046, E0053.
+For more information about an error, try `rustc --explain E0046`.

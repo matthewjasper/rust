@@ -7,27 +7,14 @@ LL | #![feature(specialization)]
    = note: `#[warn(incomplete_features)]` on by default
    = note: see issue #31844 <https://github.com/rust-lang/rust/issues/31844> for more information
 
-error[E0277]: the trait bound `(): Valid` is not satisfied
-  --> $DIR/issue-38091.rs:9:5
+error[E0275]: overflow evaluating the requirement `T: Check`
+  --> $DIR/issue-38091.rs:17:13
    |
-LL |     type Ty: Valid;
-   |              ----- required by this bound in `Iterate::Ty`
-...
-LL |     default type Ty = ();
-   |     ^^^^^^^^^^^^^^^^^^^^^ the trait `Valid` is not implemented for `()`
+LL | trait Check {}
+   | ----------- required by this bound in `Check`
+LL | impl<'a, T> Check for T where <T as Iterate<'a>>::Ty: Valid {}
+   |             ^^^^^
 
-error[E0275]: overflow evaluating the requirement `{integer}: Check`
-  --> $DIR/issue-38091.rs:20:5
-   |
-LL |     fn iterate(self);
-   |     ----------------- required by `Iterate::iterate`
-...
-LL |     Iterate::iterate(0);
-   |     ^^^^^^^^^^^^^^^^
-   |
-   = note: required because of the requirements on the impl of `Iterate<'_>` for `{integer}`
+error: aborting due to previous error; 1 warning emitted
 
-error: aborting due to 2 previous errors; 1 warning emitted
-
-Some errors have detailed explanations: E0275, E0277.
-For more information about an error, try `rustc --explain E0275`.
+For more information about this error, try `rustc --explain E0275`.

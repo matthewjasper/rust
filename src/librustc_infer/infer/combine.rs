@@ -47,6 +47,7 @@ use rustc_span::{Span, DUMMY_SP};
 pub struct CombineFields<'infcx, 'tcx> {
     pub infcx: &'infcx InferCtxt<'infcx, 'tcx>,
     pub trace: TypeTrace<'tcx>,
+    pub(super) recursion_depth: usize,
     pub cause: Option<ty::relate::Cause>,
     pub param_env: ty::ParamEnv<'tcx>,
     pub obligations: PredicateObligations<'tcx>,
@@ -304,9 +305,9 @@ impl<'infcx, 'tcx> CombineFields<'infcx, 'tcx> {
         self.infcx.inner.borrow_mut().type_variables().instantiate(b_vid, b_ty);
 
         if needs_wf {
-            // TODO: Use with_depth
-            self.obligations.push(Obligation::new(
+            self.obligations.push(Obligation::with_depth(
                 self.trace.cause.clone(),
+                self.recursion_depth,
                 self.param_env,
                 ty::PredicateKind::WellFormed(b_ty.into()).to_predicate(self.infcx.tcx),
             ));
@@ -398,9 +399,9 @@ impl<'infcx, 'tcx> CombineFields<'infcx, 'tcx> {
         ty: Ty<'tcx>,
     ) {
         let predicate = ty::Binder::dummy(ty::ProjectionPredicate { projection_ty, ty });
-        // TODO: Use with_depth
-        self.obligations.push(Obligation::new(
+        self.obligations.push(Obligation::with_depth(
             self.trace.cause.clone(),
+            self.recursion_depth,
             self.param_env,
             predicate.to_predicate(self.tcx()),
         ));
@@ -417,9 +418,9 @@ impl<'infcx, 'tcx> CombineFields<'infcx, 'tcx> {
         } else {
             ty::PredicateKind::ConstEquate(b, a)
         };
-        // TODO: Use with_depth
-        self.obligations.push(Obligation::new(
+        self.obligations.push(Obligation::with_depth(
             self.trace.cause.clone(),
+            self.recursion_depth,
             self.param_env,
             predicate.to_predicate(self.tcx()),
         ));

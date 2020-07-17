@@ -20,7 +20,6 @@ pub struct MismatchedProjectionTypes<'tcx> {
     pub err: ty::error::TypeError<'tcx>,
 }
 
-// TODO: might not be fully normalized
 #[derive(Clone, TypeFoldable)]
 pub struct Normalized<'tcx, T> {
     pub value: T,

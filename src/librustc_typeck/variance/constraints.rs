@@ -290,7 +290,7 @@ impl<'a, 'tcx> ConstraintContext<'a, 'tcx> {
                 self.add_constraints_from_substs(current, def.did, substs, variance);
             }
 
-            ty::Projection(ref data) | ty::UnnormalizedProjection(ref data) => {
+            ty::Projection(ref data) | ty::AssocTy(ref data) => {
                 self.add_constraints_from_invariant_substs(current, data.substs, variance);
             }
 

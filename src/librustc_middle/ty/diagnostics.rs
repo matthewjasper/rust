@@ -66,7 +66,7 @@ impl<'tcx> TyS<'tcx> {
     pub fn is_suggestable(&self) -> bool {
         match self.kind {
             Opaque(..) | FnDef(..) | FnPtr(..) | Dynamic(..) | Closure(..) | Infer(..)
-            | Projection(..) => false,
+            | Projection(..) | AssocTy(..) => false,
             _ => true,
         }
     }

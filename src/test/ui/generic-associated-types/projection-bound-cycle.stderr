@@ -10,8 +10,8 @@ LL | #![feature(generic_associated_types)]
 error[E0275]: overflow evaluating the requirement `<T as Foo>::Item: std::marker::Sized`
   --> $DIR/projection-bound-cycle.rs:47:5
    |
-LL | struct OnlySized<T> where T: Sized { f: T }
-   |                  - required by this bound in `OnlySized`
+LL |     type Item: Sized where <Self as Foo>::Item: Sized;
+   |                                                 ----- required by this bound in `Foo::Item`
 ...
 LL |     type Assoc = OnlySized<<T as Foo>::Item>;
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

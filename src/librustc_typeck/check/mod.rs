@@ -5532,7 +5532,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         };
         let last_expr_ty = self.node_ty(last_expr.hir_id);
         if matches!(last_expr_ty.kind, ty::Error(_))
-            || self.can_sub(self.param_env, last_expr_ty, expected_ty).is_err()
+            || !self.can_sub(self.param_env, last_expr_ty, expected_ty)
         {
             return None;
         }

@@ -87,6 +87,8 @@ pub fn equal_up_to_regions(
                 // Short-circuit.
                 return Ok(a);
             }
+            // TODO: Handle `let x: impl Trait = y`.
+            // Check that this won't cause cycles when running against early MIR stages.
             ty::relate::super_relate_tys(self, a, b)
         }
 
@@ -115,7 +117,9 @@ pub fn equal_up_to_regions(
         where
             T: Relate<'tcx>,
         {
-            self.relate(a.skip_binder(), b.skip_binder())?;
+            let a_skipped = self.tcx.normalize_erasing_late_bound_regions(self.param_env, &a);
+            let b_skipped = self.tcx.normalize_erasing_late_bound_regions(self.param_env, &b);
+            self.relate(a_skipped, b_skipped)?;
             Ok(a.clone())
         }
     }
@@ -188,9 +192,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
             return true;
         }
         // Normalize projections and things like that.
-        // FIXME: We need to reveal_all, as some optimizations change types in ways
-        // that require unfolding opaque types.
-        let param_env = self.param_env.with_reveal_all();
+        let param_env = self.param_env;
         let src = self.tcx.normalize_erasing_regions(param_env, src);
         let dest = self.tcx.normalize_erasing_regions(param_env, dest);
 
@@ -213,7 +215,7 @@ const INVALID_MIR_TYPE_FLAGS: ty::TypeFlags = ty::TypeFlags::from_bits_truncate(
         | ty::TypeFlags::NEEDS_INFER.bits()
         | ty::TypeFlags::HAS_CT_PLACEHOLDER.bits()
         | ty::TypeFlags::HAS_TY_PLACEHOLDER.bits()
-        | ty::TypeFlags::HAS_TY_UNNORMALIZED_PROJECTION.bits(),
+        | ty::TypeFlags::HAS_TY_ASSOC.bits(),
 );
 
 impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
@@ -264,6 +266,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
             }
             _ => {}
         }
+        self.super_statement(statement, location);
     }
 
     fn visit_region(&mut self, region: &ty::Region<'tcx>, location: Location) {

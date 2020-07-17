@@ -115,8 +115,9 @@ impl TypeRelation<'tcx> for Sub<'combine, 'infcx, 'tcx> {
                 // the two variables are equal modulo subtyping, which
                 // is important to the occurs check later on.
                 infcx.inner.borrow_mut().type_variables().sub(a_vid, b_vid);
-                self.fields.obligations.push(Obligation::new(
+                self.fields.obligations.push(Obligation::with_depth(
                     self.fields.trace.cause.clone(),
+                    self.fields.recursion_depth,
                     self.fields.param_env,
                     ty::PredicateKind::Subtype(ty::Binder::dummy(ty::SubtypePredicate {
                         a_is_expected: self.a_is_expected,

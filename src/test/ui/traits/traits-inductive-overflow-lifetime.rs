@@ -1,7 +1,7 @@
 // Test that we don't hit the recursion limit for short cycles involving lifetimes.
 
 // Shouldn't hit this, we should realize that we're in a cycle sooner.
-#![recursion_limit="20"]
+#![recursion_limit = "50"]
 
 trait NotAuto {}
 trait Y {
@@ -26,5 +26,7 @@ fn main() {
     // Should only be a few notes.
     is_send::<X<C<'static>>>();
     //~^ ERROR overflow evaluating
+    //~| NOTE: required
+    //~| NOTE: required
     //~| NOTE: required
 }

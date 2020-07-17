@@ -3,7 +3,7 @@ use rustc_data_structures::obligation_forest::ProcessResult;
 use rustc_data_structures::obligation_forest::{DoCompleted, Error, ForestObligation};
 use rustc_data_structures::obligation_forest::{ObligationForest, ObligationProcessor};
 use rustc_errors::ErrorReported;
-use rustc_infer::traits::{TraitEngine, TraitEngineExt as _};
+use rustc_infer::traits::{Normalized, TraitEngine, TraitEngineExt as _};
 use rustc_middle::mir::interpret::ErrorHandled;
 use rustc_middle::ty::error::ExpectedFound;
 use rustc_middle::ty::{self, Const, ToPolyTraitRef, Ty, TypeFoldable};
@@ -15,7 +15,7 @@ use super::wf;
 use super::CodeAmbiguity;
 use super::CodeProjectionError;
 use super::CodeSelectionError;
-use super::{ConstEvalFailure, Unimplemented};
+use super::{ConstEvalFailure, Overflow, Unimplemented};
 use super::{FulfillmentError, FulfillmentErrorCode};
 use super::{ObligationCause, PredicateObligation};
 
@@ -380,58 +380,44 @@ impl<'a, 'b, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'b, 'tcx> {
 
             ty::PredicateKind::TypeOutlives(ref binder) => {
                 // Check if there are higher-ranked vars.
-                match binder.no_bound_vars() {
-                    // If there are, inspect the underlying type further.
-                    None => {
-                        // Convert from `Binder<OutlivesPredicate<Ty, Region>>` to `Binder<Ty>`.
-                        let binder = binder.map_bound_ref(|pred| pred.0);
+                let ty::OutlivesPredicate(t_a, r_b) =
+                    infcx.replace_bound_vars_with_placeholders(binder);
+                if self.register_region_obligations {
+                    // Regionck isn't allowed to normalize types, since doing
+                    // so might add more region obligations. Therefore, we have
+                    // to normalize here.
+                    let Normalized { value: t_a, obligations } = project::normalize_with_depth(
+                        self.selcx,
+                        obligation.param_env,
+                        obligation.cause.clone(),
+                        obligation.recursion_depth + 1,
+                        &t_a,
+                    );
 
-                        // Check if the type has any bound vars.
-                        match binder.no_bound_vars() {
-                            // If so, this obligation is an error (for now). Eventually we should be
-                            // able to support additional cases here, like `for<'a> &'a str: 'a`.
-                            // NOTE: this is duplicate-implemented between here and fulfillment.
-                            None => ProcessResult::Error(CodeSelectionError(Unimplemented)),
-                            // Otherwise, we have something of the form
-                            // `for<'a> T: 'a where 'a not in T`, which we can treat as
-                            // `T: 'static`.
-                            Some(t_a) => {
-                                let r_static = self.selcx.tcx().lifetimes.re_static;
-                                if self.register_region_obligations {
-                                    self.selcx.infcx().register_region_obligation_with_cause(
-                                        t_a,
-                                        r_static,
-                                        &obligation.cause,
-                                    );
-                                }
-                                ProcessResult::Changed(vec![])
-                            }
-                        }
-                    }
-                    // If there aren't, register the obligation.
-                    Some(ty::OutlivesPredicate(t_a, r_b)) => {
-                        if self.register_region_obligations {
-                            self.selcx.infcx().register_region_obligation_with_cause(
-                                t_a,
-                                r_b,
-                                &obligation.cause,
-                            );
-                        }
-                        ProcessResult::Changed(vec![])
-                    }
+                    self.selcx.infcx().register_region_obligation_with_cause(
+                        t_a,
+                        r_b,
+                        &obligation.cause,
+                    );
+                    ProcessResult::Changed(mk_pending(obligations))
+                } else {
+                    ProcessResult::Changed(vec![])
                 }
             }
 
             ty::PredicateKind::Projection(ref data) => {
                 let project_obligation = obligation.with(*data);
                 match project::poly_project_and_unify_type(self.selcx, &project_obligation) {
-                    Ok(None) => {
+                    Ok(Ok(None)) => {
                         let tcx = self.selcx.tcx();
                         pending_obligation.stalled_on =
                             trait_ref_infer_vars(self.selcx, data.to_poly_trait_ref(tcx));
                         ProcessResult::Unchanged
                     }
-                    Ok(Some(os)) => ProcessResult::Changed(mk_pending(os)),
+                    Ok(Ok(Some(os))) => ProcessResult::Changed(mk_pending(os)),
+                    Ok(Err(project::RecursiveProjection)) => {
+                        ProcessResult::Error(CodeSelectionError(Overflow))
+                    }
                     Err(e) => {
                         debug!(
                             "selecting projection `{:?}` at depth {} yielded Err({:?})",
@@ -556,12 +542,7 @@ impl<'a, 'b, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'b, 'tcx> {
 
                 match (evaluate(c1), evaluate(c2)) {
                     (Ok(c1), Ok(c2)) => {
-                        match self
-                            .selcx
-                            .infcx()
-                            .at(&obligation.cause, obligation.param_env)
-                            .eq(c1, c2)
-                        {
+                        match self.selcx.infcx().at_obligation(obligation).eq(c1, c2) {
                             Ok(_) => ProcessResult::Changed(vec![]),
                             Err(err) => {
                                 ProcessResult::Error(FulfillmentErrorCode::CodeConstEquateError(

@@ -1,7 +1,7 @@
 use super::{
     ObligationCauseCode, OnUnimplementedDirective, OnUnimplementedNote, PredicateObligation,
 };
-use crate::infer::InferCtxt;
+use crate::infer::{InferCtxt, InferCtxtExt as _};
 use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::subst::Subst;
@@ -48,7 +48,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
 
             let impl_self_ty = impl_trait_ref.self_ty();
 
-            if let Ok(..) = self.can_eq(param_env, trait_self_ty, impl_self_ty) {
+            if self.can_eq(param_env, trait_self_ty, impl_self_ty) {
                 self_match_impls.push(def_id);
 
                 if trait_ref

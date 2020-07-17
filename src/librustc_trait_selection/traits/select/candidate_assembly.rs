@@ -74,17 +74,21 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             predicate: self.infcx().resolve_vars_if_possible(&obligation.predicate),
         };
 
-        if obligation.predicate.skip_binder().self_ty().is_ty_var() {
+        let self_ty = obligation.predicate.skip_binder().self_ty();
+        if self_ty.is_ty_var() {
             // Self is a type variable (e.g., `_: AsRef<str>`).
             //
             // This is somewhat problematic, as the current scheme can't really
-            // handle it turning to be a projection. This does end up as truly
-            // ambiguous in most cases anyway.
+            // handle it turning to be a projection or trait object. This does
+            // end up as truly ambiguous in most cases anyway.
             //
             // Take the fast path out - this also improves
             // performance by preventing assemble_candidates_from_impls from
             // matching every impl for this trait.
             return Ok(SelectionCandidateSet { vec: vec![], ambiguous: true });
+        } else if self_ty.is_projection() {
+            // Could normalize to a trait object, so ask for normalization.
+            return Ok(SelectionCandidateSet { vec: vec![NormalizeCandidate], ambiguous: false });
         }
 
         let mut candidates = SelectionCandidateSet { vec: Vec::new(), ambiguous: false };
@@ -153,7 +157,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // Before we go into the whole placeholder thing, just
         // quickly check if the self-type is a projection at all.
         match obligation.predicate.skip_binder().trait_ref.self_ty().kind {
-            ty::Projection(_) | ty::UnnormalizedProjection(_) | ty::Opaque(..) => {}
+            ty::AssocTy(_) | ty::Opaque(..) => {}
             ty::Infer(ty::TyVar(_)) => {
                 span_bug!(
                     obligation.cause.span,
@@ -395,7 +399,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                     // still be provided by a manual implementation for
                     // this trait and type.
                 }
-                ty::Param(..) | ty::Projection(..) | ty::UnnormalizedProjection(..) => {
+                ty::Param(..) | ty::AssocTy(..) => {
                     // In these cases, we don't know what the actual
                     // type is.  Therefore, we cannot break it down
                     // into its constituent types. So we don't

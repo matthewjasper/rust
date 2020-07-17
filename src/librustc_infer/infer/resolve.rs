@@ -182,7 +182,7 @@ struct FullTypeResolver<'a, 'tcx> {
 }
 
 const NEEDS_FOLD_FLAGS: ty::TypeFlags = ty::TypeFlags::from_bits_truncate(
-    ty::TypeFlags::NEEDS_INFER.bits() | ty::TypeFlags::HAS_TY_UNNORMALIZED_PROJECTION.bits(),
+    ty::TypeFlags::NEEDS_INFER.bits() | ty::TypeFlags::HAS_TY_ASSOC.bits(),
 );
 
 impl<'a, 'tcx> TypeFolder<'tcx> for FullTypeResolver<'a, 'tcx> {
@@ -211,7 +211,7 @@ impl<'a, 'tcx> TypeFolder<'tcx> for FullTypeResolver<'a, 'tcx> {
                 ty::Infer(_) => {
                     bug!("Unexpected type in full type resolver: {:?}", t);
                 }
-                ty::UnnormalizedProjection(data) => {
+                ty::AssocTy(data) => {
                     self.tcx().mk_projection(data.item_def_id, data.substs.fold_with(self))
                 }
                 _ => t.super_fold_with(self),

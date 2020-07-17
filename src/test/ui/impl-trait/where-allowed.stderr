@@ -261,13 +261,85 @@ error: could not find defining uses
 LL |     type Out = impl Debug;
    |                ^^^^^^^^^^
 
+error[E0283]: type annotations needed
+  --> $DIR/where-allowed.rs:47:66
+   |
+LL | fn in_impl_Fn_parameter_in_parameters(_: &impl Fn(impl Debug)) { panic!() }
+   |                                                                  ^^^^^^^^ cannot infer type for reference `&str`
+   | 
+  ::: $SRC_DIR/libstd/panicking.rs:LL:COL
+   |
+LL | pub fn begin_panic<M: Any + Send>(msg: M) -> ! {
+   |                       --- required by this bound in `std::rt::begin_panic`
+   |
+   = note: cannot satisfy `&str: std::any::Any`
+   = note: this error originates in a macro (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider specifying the type argument in the function call
+   |
+LL |     ($msg:expr) => ({ $crate::rt::begin_panic::<M>($msg) });
+   |                                              ^^^^^
+
+error[E0283]: type annotations needed
+  --> $DIR/where-allowed.rs:52:67
+   |
+LL | fn in_impl_Fn_return_in_parameters(_: &impl Fn() -> impl Debug) { panic!() }
+   |                                                                   ^^^^^^^^ cannot infer type for reference `&str`
+   | 
+  ::: $SRC_DIR/libstd/panicking.rs:LL:COL
+   |
+LL | pub fn begin_panic<M: Any + Send>(msg: M) -> ! {
+   |                       --- required by this bound in `std::rt::begin_panic`
+   |
+   = note: cannot satisfy `&str: std::any::Any`
+   = note: this error originates in a macro (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider specifying the type argument in the function call
+   |
+LL |     ($msg:expr) => ({ $crate::rt::begin_panic::<M>($msg) });
+   |                                              ^^^^^
+
+error[E0283]: type annotations needed
+  --> $DIR/where-allowed.rs:65:60
+   |
+LL | fn in_Fn_parameter_in_generics<F: Fn(impl Debug)> (_: F) { panic!() }
+   |                                                            ^^^^^^^^ cannot infer type for reference `&str`
+   | 
+  ::: $SRC_DIR/libstd/panicking.rs:LL:COL
+   |
+LL | pub fn begin_panic<M: Any + Send>(msg: M) -> ! {
+   |                       --- required by this bound in `std::rt::begin_panic`
+   |
+   = note: cannot satisfy `&str: std::any::Any`
+   = note: this error originates in a macro (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider specifying the type argument in the function call
+   |
+LL |     ($msg:expr) => ({ $crate::rt::begin_panic::<M>($msg) });
+   |                                              ^^^^^
+
+error[E0283]: type annotations needed
+  --> $DIR/where-allowed.rs:69:61
+   |
+LL | fn in_Fn_return_in_generics<F: Fn() -> impl Debug> (_: F) { panic!() }
+   |                                                             ^^^^^^^^ cannot infer type for reference `&str`
+   | 
+  ::: $SRC_DIR/libstd/panicking.rs:LL:COL
+   |
+LL | pub fn begin_panic<M: Any + Send>(msg: M) -> ! {
+   |                       --- required by this bound in `std::rt::begin_panic`
+   |
+   = note: cannot satisfy `&str: std::any::Any`
+   = note: this error originates in a macro (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider specifying the type argument in the function call
+   |
+LL |     ($msg:expr) => ({ $crate::rt::begin_panic::<M>($msg) });
+   |                                              ^^^^^
+
 error: could not find defining uses
   --> $DIR/where-allowed.rs:155:23
    |
 LL | type InTypeAlias<R> = impl Debug;
    |                       ^^^^^^^^^^
 
-error: aborting due to 42 previous errors
+error: aborting due to 46 previous errors
 
-Some errors have detailed explanations: E0562, E0658, E0666.
-For more information about an error, try `rustc --explain E0562`.
+Some errors have detailed explanations: E0283, E0562, E0658, E0666.
+For more information about an error, try `rustc --explain E0283`.

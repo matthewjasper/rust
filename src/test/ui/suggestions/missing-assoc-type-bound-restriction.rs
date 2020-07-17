@@ -1,6 +1,8 @@
 // Running rustfix would cause the same suggestion to be applied multiple times, which results in
 // invalid code.
 
+// check-pass
+
 trait Parent {
     type Ty;
     type Assoc: Child<Self::Ty>;
@@ -17,7 +19,6 @@ struct ParentWrapper<T>(T);
 impl<A, T: Parent<Ty = A>> Parent for ParentWrapper<T> {
     type Ty = A;
     type Assoc = ChildWrapper<T::Assoc>;
-    //~^ ERROR the trait bound `<T as Parent>::Assoc: Child<A>` is not satisfied
 }
 
 fn main() {}

@@ -1,11 +1,11 @@
 error[E0282]: type annotations needed for `std::option::Option<T>`
-  --> $DIR/unboxed-closures-failed-recursive-fn-2.rs:16:32
+  --> $DIR/unboxed-closures-failed-recursive-fn-2.rs:15:21
    |
 LL |     let mut closure0 = None;
-   |         ------------ consider giving `closure0` the explicit type `std::option::Option<T>`, with the type parameters specified
+   |         ------------ consider giving `closure0` the explicit type `std::option::Option<T>`, where the type parameter `T` is specified
 ...
-LL |                         return c();
-   |                                ^^^ cannot infer type
+LL |                     Some(c) => {
+   |                     ^^^^^^^ cannot infer type for type parameter `T` declared on the enum `Option`
    |
    = note: type must be known at this point
 

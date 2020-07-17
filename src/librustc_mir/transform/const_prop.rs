@@ -703,14 +703,13 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         // FIXME> figure out what to do when try_read_immediate fails
         let imm = self.use_ecx(|this| this.ecx.try_read_immediate(value));
 
+        let rval_ty = rval.ty(&self.local_decls, self.tcx);
+
         if let Some(Ok(imm)) = imm {
             match *imm {
                 interpret::Immediate::Scalar(ScalarMaybeUninit::Scalar(scalar)) => {
-                    *rval = Rvalue::Use(self.operand_from_scalar(
-                        scalar,
-                        value.layout.ty,
-                        source_info.span,
-                    ));
+                    *rval =
+                        Rvalue::Use(self.operand_from_scalar(scalar, rval_ty, source_info.span));
                 }
                 Immediate::ScalarPair(
                     ScalarMaybeUninit::Scalar(one),
@@ -720,14 +719,13 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                     // Rvalue is also a pair with two scalars. The more general case is more
                     // complicated to implement so we'll do it later.
                     // FIXME: implement the general case stated above ^.
-                    let ty = &value.layout.ty.kind;
                     // Only do it for tuples
-                    if let ty::Tuple(substs) = ty {
+                    if let ty::Tuple(substs) = rval_ty.kind {
                         // Only do it if tuple is also a pair with two scalars
-                        if substs.len() == 2 {
+                        if let [rval_ty1, rval_ty2] = **substs {
                             let opt_ty1_ty2 = self.use_ecx(|this| {
-                                let ty1 = substs[0].expect_ty();
-                                let ty2 = substs[1].expect_ty();
+                                let ty1 = rval_ty1.expect_ty();
+                                let ty2 = rval_ty2.expect_ty();
                                 let ty_is_scalar = |ty| {
                                     this.ecx.layout_of(ty).ok().map(|layout| layout.abi.is_scalar())
                                         == Some(true)

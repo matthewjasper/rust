@@ -7,6 +7,8 @@ LL | fn is_send<S: NotAuto>() {}
 LL |     is_send::<X<C<'static>>>();
    |     ^^^^^^^^^^^^^^^^^^^^^^^^
    |
+   = note: required because of the requirements on the impl of `NotAuto` for `X<C<'_>>`
+   = note: required because of the requirements on the impl of `NotAuto` for `std::boxed::Box<X<C<'_>>>`
    = note: required because of the requirements on the impl of `NotAuto` for `X<C<'static>>`
 
 error: aborting due to previous error

@@ -330,7 +330,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
         let self_ty = trait_ref.skip_binder().self_ty();
         let (param_ty, projection) = match &self_ty.kind {
             ty::Param(_) => (true, None),
-            ty::Projection(projection) => (false, Some(projection)),
+            ty::AssocTy(projection) => (false, Some(projection)),
             _ => return,
         };
 

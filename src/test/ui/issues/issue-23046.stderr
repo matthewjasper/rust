@@ -1,8 +1,10 @@
 error[E0282]: type annotations needed for the closure `fn(Expr<'_, _>) -> Expr<'_, _>`
-  --> $DIR/issue-23046.rs:18:9
+  --> $DIR/issue-23046.rs:18:14
    |
 LL |         let_(add(x,x), |y| {
-   |         ^^^^ cannot infer type for type parameter `VAR` declared on the function `let_`
+   |         ---- ^^^
+   |         |
+   |         cannot infer type for type parameter `VAR` declared on the function `add`
    |
 help: give this closure an explicit return type without `_` placeholders
    |

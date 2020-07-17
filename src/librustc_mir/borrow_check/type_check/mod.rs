@@ -371,17 +371,13 @@ impl<'a, 'b, 'tcx> Visitor<'tcx> for TypeVerifier<'a, 'b, 'tcx> {
                     }
                 }
             } else if let Some(static_def_id) = constant.check_static_ptr(tcx) {
-                let unnormalized_ty = tcx.type_of(static_def_id);
+                let static_ty = tcx.type_of(static_def_id);
                 let locations = location.to_locations();
-                let normalized_ty = self.cx.normalize(unnormalized_ty, locations);
                 let literal_ty = constant.literal.ty.builtin_deref(true).unwrap().ty;
 
-                if let Err(terr) = self.cx.eq_types(
-                    normalized_ty,
-                    literal_ty,
-                    locations,
-                    ConstraintCategory::Boring,
-                ) {
+                if let Err(terr) =
+                    self.cx.eq_types(static_ty, literal_ty, locations, ConstraintCategory::Boring)
+                {
                     span_mirbug!(self, constant, "bad static type {:?} ({:?})", constant, terr);
                 }
             }
@@ -693,7 +689,6 @@ impl<'a, 'b, 'tcx> TypeVerifier<'a, 'b, 'tcx> {
                 let fty = self.sanitize_type(place, fty);
                 match self.field_ty(place, base, field, location) {
                     Ok(ty) => {
-                        let ty = self.cx.normalize(ty, location);
                         if let Err(terr) = self.cx.eq_types(
                             ty,
                             fty,
@@ -1001,9 +996,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
             let (annotation, _) =
                 self.infcx.instantiate_canonical_with_fresh_inference_vars(span, user_ty);
             match annotation {
-                UserType::Ty(mut ty) => {
-                    ty = self.normalize(ty, Locations::All(span));
-
+                UserType::Ty(ty) => {
                     if let Err(terr) = self.eq_types(
                         ty,
                         inferred_ty,
@@ -1297,6 +1290,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                     );
 
                     for (&opaque_def_id, opaque_decl) in &opaque_type_map {
+                        // TODO: Insufficient with lazy norm.
                         let resolved_ty = infcx.resolve_vars_if_possible(&opaque_decl.concrete_ty);
                         let concrete_is_opaque = if let ty::Opaque(def_id, _) = resolved_ty.kind {
                             def_id == opaque_def_id
@@ -1452,7 +1446,6 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 let place_ty = place.ty(body, tcx).ty;
                 let place_ty = self.normalize(place_ty, location);
                 let rv_ty = rv.ty(body, tcx);
-                let rv_ty = self.normalize(rv_ty, location);
                 if let Err(terr) =
                     self.sub_types_or_anon(rv_ty, place_ty, location.to_locations(), category)
                 {
@@ -1628,6 +1621,8 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                     LateBoundRegionConversionTime::FnCall,
                     &sig,
                 );
+                // Work around some implied bounds weirdness.
+                // TODO: example.
                 let sig = self.normalize(sig, term_location);
                 self.check_call_dest(body, term, &sig, destination, term_location);
 
@@ -1708,7 +1703,6 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         match *destination {
             Some((ref dest, _target_block)) => {
                 let dest_ty = dest.ty(body, tcx).ty;
-                let dest_ty = self.normalize(dest_ty, term_location);
                 let category = match dest.as_local() {
                     Some(RETURN_PLACE) => {
                         if let BorrowCheckContext {
@@ -1777,7 +1771,6 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         }
         for (n, (fn_arg, op_arg)) in sig.inputs().iter().zip(args).enumerate() {
             let op_arg_ty = op_arg.ty(body, self.tcx());
-            let op_arg_ty = self.normalize(op_arg_ty, term_location);
             let category = if from_hir_call {
                 ConstraintCategory::CallArgument
             } else {
@@ -1955,7 +1948,6 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         &mut self,
         ak: &AggregateKind<'tcx>,
         field_index: usize,
-        location: Location,
     ) -> Result<Ty<'tcx>, FieldAccessError> {
         let tcx = self.tcx();
 
@@ -1964,7 +1956,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 let variant = &def.variants[variant_index];
                 let adj_field_index = active_field_index.unwrap_or(field_index);
                 if let Some(field) = variant.fields.get(adj_field_index) {
-                    Ok(self.normalize(field.ty(tcx, substs), location))
+                    Ok(field.ty(tcx, substs))
                 } else {
                     Err(FieldAccessError::OutOfRange { field_count: variant.fields.len() })
                 }
@@ -2079,237 +2071,206 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 );
             }
 
-            Rvalue::Cast(cast_kind, op, ty) => {
-                match cast_kind {
-                    CastKind::Pointer(PointerCast::ReifyFnPointer) => {
-                        let fn_sig = op.ty(body, tcx).fn_sig(tcx);
+            Rvalue::Cast(cast_kind, op, ty) => match cast_kind {
+                CastKind::Pointer(PointerCast::ReifyFnPointer) => {
+                    let fn_sig = op.ty(body, tcx).fn_sig(tcx);
 
-                        // The type that we see in the fcx is like
-                        // `foo::<'a, 'b>`, where `foo` is the path to a
-                        // function definition. When we extract the
-                        // signature, it comes from the `fn_sig` query,
-                        // and hence may contain unnormalized results.
-                        let fn_sig = self.normalize(fn_sig, location);
+                    let ty_fn_ptr_from = tcx.mk_fn_ptr(fn_sig);
 
-                        let ty_fn_ptr_from = tcx.mk_fn_ptr(fn_sig);
-
-                        if let Err(terr) = self.eq_types(
+                    if let Err(terr) = self.eq_types(
+                        ty_fn_ptr_from,
+                        ty,
+                        location.to_locations(),
+                        ConstraintCategory::Cast,
+                    ) {
+                        span_mirbug!(
+                            self,
+                            rvalue,
+                            "equating {:?} with {:?} yields {:?}",
                             ty_fn_ptr_from,
                             ty,
-                            location.to_locations(),
-                            ConstraintCategory::Cast,
-                        ) {
-                            span_mirbug!(
-                                self,
-                                rvalue,
-                                "equating {:?} with {:?} yields {:?}",
-                                ty_fn_ptr_from,
-                                ty,
-                                terr
-                            );
-                        }
-                    }
-
-                    CastKind::Pointer(PointerCast::ClosureFnPointer(unsafety)) => {
-                        let sig = match op.ty(body, tcx).kind {
-                            ty::Closure(_, substs) => substs.as_closure().sig(),
-                            _ => bug!(),
-                        };
-                        let ty_fn_ptr_from = tcx.mk_fn_ptr(tcx.signature_unclosure(sig, *unsafety));
-
-                        if let Err(terr) = self.eq_types(
-                            ty_fn_ptr_from,
-                            ty,
-                            location.to_locations(),
-                            ConstraintCategory::Cast,
-                        ) {
-                            span_mirbug!(
-                                self,
-                                rvalue,
-                                "equating {:?} with {:?} yields {:?}",
-                                ty_fn_ptr_from,
-                                ty,
-                                terr
-                            );
-                        }
-                    }
-
-                    CastKind::Pointer(PointerCast::UnsafeFnPointer) => {
-                        let fn_sig = op.ty(body, tcx).fn_sig(tcx);
-
-                        // The type that we see in the fcx is like
-                        // `foo::<'a, 'b>`, where `foo` is the path to a
-                        // function definition. When we extract the
-                        // signature, it comes from the `fn_sig` query,
-                        // and hence may contain unnormalized results.
-                        let fn_sig = self.normalize(fn_sig, location);
-
-                        let ty_fn_ptr_from = tcx.safe_to_unsafe_fn_ty(fn_sig);
-
-                        if let Err(terr) = self.eq_types(
-                            ty_fn_ptr_from,
-                            ty,
-                            location.to_locations(),
-                            ConstraintCategory::Cast,
-                        ) {
-                            span_mirbug!(
-                                self,
-                                rvalue,
-                                "equating {:?} with {:?} yields {:?}",
-                                ty_fn_ptr_from,
-                                ty,
-                                terr
-                            );
-                        }
-                    }
-
-                    CastKind::Pointer(PointerCast::Unsize) => {
-                        let &ty = ty;
-                        let trait_ref = ty::TraitRef {
-                            def_id: tcx.require_lang_item(
-                                CoerceUnsizedTraitLangItem,
-                                Some(self.last_span),
-                            ),
-                            substs: tcx.mk_substs_trait(op.ty(body, tcx), &[ty.into()]),
-                        };
-
-                        self.prove_trait_ref(
-                            trait_ref,
-                            location.to_locations(),
-                            ConstraintCategory::Cast,
+                            terr
                         );
                     }
+                }
 
-                    CastKind::Pointer(PointerCast::MutToConstPointer) => {
-                        let ty_from = match op.ty(body, tcx).kind {
-                            ty::RawPtr(ty::TypeAndMut {
-                                ty: ty_from,
-                                mutbl: hir::Mutability::Mut,
-                            }) => ty_from,
-                            _ => {
-                                span_mirbug!(
-                                    self,
-                                    rvalue,
-                                    "unexpected base type for cast {:?}",
-                                    ty,
-                                );
-                                return;
-                            }
-                        };
-                        let ty_to = match ty.kind {
-                            ty::RawPtr(ty::TypeAndMut {
-                                ty: ty_to,
-                                mutbl: hir::Mutability::Not,
-                            }) => ty_to,
-                            _ => {
-                                span_mirbug!(
-                                    self,
-                                    rvalue,
-                                    "unexpected target type for cast {:?}",
-                                    ty,
-                                );
-                                return;
-                            }
-                        };
-                        if let Err(terr) = self.sub_types(
-                            ty_from,
-                            ty_to,
-                            location.to_locations(),
-                            ConstraintCategory::Cast,
-                        ) {
-                            span_mirbug!(
-                                self,
-                                rvalue,
-                                "relating {:?} with {:?} yields {:?}",
-                                ty_from,
-                                ty_to,
-                                terr
-                            );
-                        }
-                    }
+                CastKind::Pointer(PointerCast::ClosureFnPointer(unsafety)) => {
+                    let sig = match op.ty(body, tcx).kind {
+                        ty::Closure(_, substs) => substs.as_closure().sig(),
+                        _ => bug!(),
+                    };
+                    let ty_fn_ptr_from = tcx.mk_fn_ptr(tcx.signature_unclosure(sig, *unsafety));
 
-                    CastKind::Pointer(PointerCast::ArrayToPointer) => {
-                        let ty_from = op.ty(body, tcx);
-
-                        let opt_ty_elem = match ty_from.kind {
-                            ty::RawPtr(ty::TypeAndMut {
-                                mutbl: hir::Mutability::Not,
-                                ty: array_ty,
-                            }) => match array_ty.kind {
-                                ty::Array(ty_elem, _) => Some(ty_elem),
-                                _ => None,
-                            },
-                            _ => None,
-                        };
-
-                        let ty_elem = match opt_ty_elem {
-                            Some(ty_elem) => ty_elem,
-                            None => {
-                                span_mirbug!(
-                                    self,
-                                    rvalue,
-                                    "ArrayToPointer cast from unexpected type {:?}",
-                                    ty_from,
-                                );
-                                return;
-                            }
-                        };
-
-                        let ty_to = match ty.kind {
-                            ty::RawPtr(ty::TypeAndMut {
-                                mutbl: hir::Mutability::Not,
-                                ty: ty_to,
-                            }) => ty_to,
-                            _ => {
-                                span_mirbug!(
-                                    self,
-                                    rvalue,
-                                    "ArrayToPointer cast to unexpected type {:?}",
-                                    ty,
-                                );
-                                return;
-                            }
-                        };
-
-                        if let Err(terr) = self.sub_types(
-                            ty_elem,
-                            ty_to,
-                            location.to_locations(),
-                            ConstraintCategory::Cast,
-                        ) {
-                            span_mirbug!(
-                                self,
-                                rvalue,
-                                "relating {:?} with {:?} yields {:?}",
-                                ty_elem,
-                                ty_to,
-                                terr
-                            )
-                        }
-                    }
-
-                    CastKind::Misc => {
-                        let ty_from = op.ty(body, tcx);
-                        let cast_ty_from = CastTy::from_ty(ty_from);
-                        let cast_ty_to = CastTy::from_ty(ty);
-                        match (cast_ty_from, cast_ty_to) {
-                            (None, _)
-                            | (_, None | Some(CastTy::FnPtr))
-                            | (Some(CastTy::Float), Some(CastTy::Ptr(_)))
-                            | (Some(CastTy::Ptr(_) | CastTy::FnPtr), Some(CastTy::Float)) => {
-                                span_mirbug!(self, rvalue, "Invalid cast {:?} -> {:?}", ty_from, ty,)
-                            }
-                            (
-                                Some(CastTy::Int(_)),
-                                Some(CastTy::Int(_) | CastTy::Float | CastTy::Ptr(_)),
-                            )
-                            | (Some(CastTy::Float), Some(CastTy::Int(_) | CastTy::Float))
-                            | (Some(CastTy::Ptr(_)), Some(CastTy::Int(_) | CastTy::Ptr(_)))
-                            | (Some(CastTy::FnPtr), Some(CastTy::Int(_) | CastTy::Ptr(_))) => (),
-                        }
+                    if let Err(terr) = self.eq_types(
+                        ty_fn_ptr_from,
+                        ty,
+                        location.to_locations(),
+                        ConstraintCategory::Cast,
+                    ) {
+                        span_mirbug!(
+                            self,
+                            rvalue,
+                            "equating {:?} with {:?} yields {:?}",
+                            ty_fn_ptr_from,
+                            ty,
+                            terr
+                        );
                     }
                 }
-            }
+
+                CastKind::Pointer(PointerCast::UnsafeFnPointer) => {
+                    let fn_sig = op.ty(body, tcx).fn_sig(tcx);
+
+                    let ty_fn_ptr_from = tcx.safe_to_unsafe_fn_ty(fn_sig);
+
+                    if let Err(terr) = self.eq_types(
+                        ty_fn_ptr_from,
+                        ty,
+                        location.to_locations(),
+                        ConstraintCategory::Cast,
+                    ) {
+                        span_mirbug!(
+                            self,
+                            rvalue,
+                            "equating {:?} with {:?} yields {:?}",
+                            ty_fn_ptr_from,
+                            ty,
+                            terr
+                        );
+                    }
+                }
+
+                CastKind::Pointer(PointerCast::Unsize) => {
+                    let &ty = ty;
+                    let trait_ref = ty::TraitRef {
+                        def_id: tcx
+                            .require_lang_item(CoerceUnsizedTraitLangItem, Some(self.last_span)),
+                        substs: tcx.mk_substs_trait(op.ty(body, tcx), &[ty.into()]),
+                    };
+
+                    self.prove_trait_ref(
+                        trait_ref,
+                        location.to_locations(),
+                        ConstraintCategory::Cast,
+                    );
+                }
+
+                CastKind::Pointer(PointerCast::MutToConstPointer) => {
+                    let ty_from = match op.ty(body, tcx).kind {
+                        ty::RawPtr(ty::TypeAndMut { ty: ty_from, mutbl: hir::Mutability::Mut }) => {
+                            ty_from
+                        }
+                        _ => {
+                            span_mirbug!(self, rvalue, "unexpected base type for cast {:?}", ty,);
+                            return;
+                        }
+                    };
+                    let ty_to = match ty.kind {
+                        ty::RawPtr(ty::TypeAndMut { ty: ty_to, mutbl: hir::Mutability::Not }) => {
+                            ty_to
+                        }
+                        _ => {
+                            span_mirbug!(self, rvalue, "unexpected target type for cast {:?}", ty,);
+                            return;
+                        }
+                    };
+                    if let Err(terr) = self.sub_types(
+                        ty_from,
+                        ty_to,
+                        location.to_locations(),
+                        ConstraintCategory::Cast,
+                    ) {
+                        span_mirbug!(
+                            self,
+                            rvalue,
+                            "relating {:?} with {:?} yields {:?}",
+                            ty_from,
+                            ty_to,
+                            terr
+                        );
+                    }
+                }
+
+                CastKind::Pointer(PointerCast::ArrayToPointer) => {
+                    let ty_from = op.ty(body, tcx);
+
+                    let opt_ty_elem = match ty_from.kind {
+                        ty::RawPtr(ty::TypeAndMut {
+                            mutbl: hir::Mutability::Not,
+                            ty: array_ty,
+                        }) => match array_ty.kind {
+                            ty::Array(ty_elem, _) => Some(ty_elem),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+
+                    let ty_elem = match opt_ty_elem {
+                        Some(ty_elem) => ty_elem,
+                        None => {
+                            span_mirbug!(
+                                self,
+                                rvalue,
+                                "ArrayToPointer cast from unexpected type {:?}",
+                                ty_from,
+                            );
+                            return;
+                        }
+                    };
+
+                    let ty_to = match ty.kind {
+                        ty::RawPtr(ty::TypeAndMut { mutbl: hir::Mutability::Not, ty: ty_to }) => {
+                            ty_to
+                        }
+                        _ => {
+                            span_mirbug!(
+                                self,
+                                rvalue,
+                                "ArrayToPointer cast to unexpected type {:?}",
+                                ty,
+                            );
+                            return;
+                        }
+                    };
+
+                    if let Err(terr) = self.sub_types(
+                        ty_elem,
+                        ty_to,
+                        location.to_locations(),
+                        ConstraintCategory::Cast,
+                    ) {
+                        span_mirbug!(
+                            self,
+                            rvalue,
+                            "relating {:?} with {:?} yields {:?}",
+                            ty_elem,
+                            ty_to,
+                            terr
+                        )
+                    }
+                }
+
+                CastKind::Misc => {
+                    let ty_from = op.ty(body, tcx);
+                    let cast_ty_from = CastTy::from_ty(ty_from);
+                    let cast_ty_to = CastTy::from_ty(ty);
+                    match (cast_ty_from, cast_ty_to) {
+                        (None, _)
+                        | (_, None | Some(CastTy::FnPtr))
+                        | (Some(CastTy::Float), Some(CastTy::Ptr(_)))
+                        | (Some(CastTy::Ptr(_) | CastTy::FnPtr), Some(CastTy::Float)) => {
+                            span_mirbug!(self, rvalue, "Invalid cast {:?} -> {:?}", ty_from, ty,)
+                        }
+                        (
+                            Some(CastTy::Int(_)),
+                            Some(CastTy::Int(_) | CastTy::Float | CastTy::Ptr(_)),
+                        )
+                        | (Some(CastTy::Float), Some(CastTy::Int(_) | CastTy::Float))
+                        | (Some(CastTy::Ptr(_)), Some(CastTy::Int(_) | CastTy::Ptr(_)))
+                        | (Some(CastTy::FnPtr), Some(CastTy::Int(_) | CastTy::Ptr(_))) => (),
+                    }
+                }
+            },
 
             Rvalue::Ref(region, _borrow_kind, borrowed_place) => {
                 self.add_reborrow_constraint(&body, location, region, borrowed_place);
@@ -2429,7 +2390,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         }
 
         for (i, operand) in operands.iter().enumerate() {
-            let field_ty = match self.aggregate_field_ty(aggregate_kind, i, location) {
+            let field_ty = match self.aggregate_field_ty(aggregate_kind, i) {
                 Ok(field_ty) => field_ty,
                 Err(FieldAccessError::OutOfRange { field_count }) => {
                     span_mirbug!(
@@ -2443,7 +2404,6 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 }
             };
             let operand_ty = operand.ty(body, tcx);
-            let operand_ty = self.normalize(operand_ty, location);
 
             if let Err(terr) = self.sub_types(
                 operand_ty,
@@ -2736,7 +2696,6 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         locations: Locations,
     ) {
         for predicate in instantiated_predicates.predicates {
-            let predicate = self.normalize(predicate, locations);
             self.prove_predicate(predicate, locations, ConstraintCategory::Boring);
         }
     }

@@ -2,13 +2,13 @@ error: `impl` item signature doesn't match `trait` item signature
   --> $DIR/self-without-lifetime-constraint.rs:45:5
    |
 LL |     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self, &Self>;
-   |     -------------------------------------------------------------------- expected `fn(ValueRef<'_>) -> std::result::Result<(&str, &&str), FromSqlError>`
+   |     -------------------------------------------------------------------- expected `for<'r> fn(ValueRef<'r>) -> std::result::Result<(&str, &'r &str), FromSqlError>`
 ...
 LL |     fn column_result(value: ValueRef<'_>) -> FromSqlResult<&str, &&str> {
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ found `fn(ValueRef<'_>) -> std::result::Result<(&str, &&str), FromSqlError>`
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ found `for<'r> fn(ValueRef<'r>) -> std::result::Result<(&'r str, &'r &'r str), FromSqlError>`
    |
-   = note: expected `fn(ValueRef<'_>) -> std::result::Result<(&str, &&str), _>`
-              found `fn(ValueRef<'_>) -> std::result::Result<(&str, &&str), _>`
+   = note: expected `for<'r> fn(ValueRef<'_>) -> std::result::Result<(&str, &'r &str), _>`
+              found `for<'r> fn(ValueRef<'_>) -> std::result::Result<(&'r str, &'r &'r str), _>`
 help: the lifetime requirements from the `impl` do not correspond to the requirements in the `trait`
   --> $DIR/self-without-lifetime-constraint.rs:41:60
    |

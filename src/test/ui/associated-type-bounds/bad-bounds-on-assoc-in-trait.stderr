@@ -49,6 +49,21 @@ help: consider further restricting the associated type
 LL | trait Case1 where <<Self as Case1>::C as std::iter::Iterator>::Item: std::marker::Sync {
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error: aborting due to 3 previous errors
+error[E0271]: type mismatch resolving `<<Self as Case1>::C as std::iter::Iterator>::Item == <Self as Case1>::C`
+  --> $DIR/bad-bounds-on-assoc-in-trait.rs:22:5
+   |
+LL | /     type C: Clone + Iterator<Item:
+LL | |         Send + Iterator<Item:
+LL | |             for<'a> Lam<&'a u8, App:
+LL | |                 Debug
+LL | |             >
+LL | |         > + Sync>;
+   | |__________________^ expected std::iter::Iterator::Item, found Case1::C
+   |
+   = note: expected associated type `<<Self as Case1>::C as std::iter::Iterator>::Item`
+              found associated type `<Self as Case1>::C`
 
-For more information about this error, try `rustc --explain E0277`.
+error: aborting due to 4 previous errors
+
+Some errors have detailed explanations: E0271, E0277.
+For more information about an error, try `rustc --explain E0271`.

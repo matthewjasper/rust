@@ -1914,7 +1914,7 @@ impl<'tcx> TyCtxt<'tcx> {
             Param,
             Infer,
             Projection,
-            UnnormalizedProjection,
+            AssocTy,
             Opaque,
             Foreign
         );
@@ -2109,17 +2109,32 @@ impl<'tcx> TyCtxt<'tcx> {
         })
     }
 
-    /// Same a `self.mk_region(kind)`, but avoids accessing the interners if
+    /// Same as `self.mk_region(kind)`, but avoids accessing the interners if
     /// `*r == kind`.
     #[inline]
     pub fn reuse_or_mk_region(self, r: Region<'tcx>, kind: RegionKind) -> Region<'tcx> {
         if *r == kind { r } else { self.mk_region(kind) }
     }
 
+    /// Same as `self.mk_region(kind)`, but avoids accessing the interners if
+    /// `*r == kind`.
+    #[inline]
+    pub fn reuse_or_mk_const(self, ct: &'tcx Const<'tcx>, kind: Const<'tcx>) -> &'tcx Const<'tcx> {
+        if *ct == kind { ct } else { self.mk_const(kind) }
+    }
+
     #[allow(rustc::usage_of_ty_tykind)]
     #[inline]
     pub fn mk_ty(&self, st: TyKind<'tcx>) -> Ty<'tcx> {
         self.interners.intern_ty(st)
+    }
+
+    /// Same as `self.mk_ty(kind)`, but avoids accessing the interners if
+    /// `t.kind == kind`.
+    #[allow(rustc::usage_of_ty_tykind)]
+    #[inline]
+    pub fn reuse_or_mk_ty(self, t: Ty<'tcx>, kind: TyKind<'tcx>) -> Ty<'tcx> {
+        if t.kind == kind { t } else { self.mk_ty(kind) }
     }
 
     #[inline]
@@ -2307,12 +2322,8 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 
     #[inline]
-    pub fn mk_unnormalized_projection(
-        self,
-        item_def_id: DefId,
-        substs: SubstsRef<'tcx>,
-    ) -> Ty<'tcx> {
-        self.mk_ty(UnnormalizedProjection(ProjectionTy { item_def_id, substs }))
+    pub fn mk_assoc_ty(self, item_def_id: DefId, substs: SubstsRef<'tcx>) -> Ty<'tcx> {
+        self.mk_ty(AssocTy(ProjectionTy { item_def_id, substs }))
     }
 
     #[inline]

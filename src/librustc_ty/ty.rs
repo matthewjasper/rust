@@ -41,7 +41,7 @@ fn sized_constraint_for_ty<'tcx>(
                 .collect()
         }
 
-        Projection(..) | UnnormalizedProjection(..) | Opaque(..) => {
+        Projection(..) | AssocTy(..) | Opaque(..) => {
             // must calculate explicitly.
             // FIXME: consider special-casing always-Sized projections
             vec![ty]

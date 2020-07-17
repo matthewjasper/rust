@@ -19,8 +19,8 @@ LL |     fn bar(&self);
 LL |     fn bar(&mut self) { }
    |            ^^^^^^^^^ types differ in mutability
    |
-   = note: expected fn pointer `fn(&Bar)`
-              found fn pointer `fn(&mut Bar)`
+   = note: expected fn pointer `for<'r> fn(&'r Bar)`
+              found fn pointer `for<'r> fn(&'r mut Bar)`
 help: consider change the type to match the mutability in trait
    |
 LL |     fn bar(&self) { }

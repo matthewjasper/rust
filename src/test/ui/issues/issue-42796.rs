@@ -6,8 +6,13 @@ impl<T, Smoke> Mirror<Smoke> for T {
     type Image = T;
 }
 
-pub fn poison<S>(victim: String) where <String as Mirror<S>>::Image: Copy {
-    loop { drop(victim); }
+pub fn poison<S>(victim: String)
+where
+    <String as Mirror<S>>::Image: Copy,
+{
+    loop {
+        drop(victim);
+    }
 }
 
 fn main() {

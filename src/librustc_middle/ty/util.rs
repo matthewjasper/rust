@@ -3,6 +3,7 @@
 use crate::ich::NodeIdHashingMode;
 use crate::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 use crate::mir::interpret::{sign_extend, truncate};
+use crate::ty::fold::TypeFolder;
 use crate::ty::layout::IntegerExt;
 use crate::ty::query::TyCtxtAt;
 use crate::ty::subst::{GenericArgKind, InternalSubsts, Subst, SubstsRef};
@@ -557,8 +558,6 @@ impl<'tcx> TyCtxt<'tcx> {
         def_id: DefId,
         substs: SubstsRef<'tcx>,
     ) -> Result<Ty<'tcx>, Ty<'tcx>> {
-        use crate::ty::fold::TypeFolder;
-
         struct OpaqueTypeExpander<'tcx> {
             // Contains the DefIds of the opaque types that are currently being
             // expanded. When we expand an opaque type we insert the DefId of
@@ -630,6 +629,33 @@ impl<'tcx> TyCtxt<'tcx> {
         };
         let expanded_type = visitor.expand_opaque_ty(def_id, substs).unwrap();
         if visitor.found_recursion { Err(expanded_type) } else { Ok(expanded_type) }
+    }
+
+    /// "Resets" `ty::Assoc`s in `t` to `ty::Projection`.
+    // TODO: Is this really needed?
+    pub fn reset_projections<T: TypeFoldable<'tcx>>(self, t: &T) -> T {
+        struct ProjectionReseter<'tcx> {
+            tcx: TyCtxt<'tcx>,
+        }
+
+        impl<'tcx> TypeFolder<'tcx> for ProjectionReseter<'tcx> {
+            fn tcx(&self) -> TyCtxt<'tcx> {
+                self.tcx
+            }
+
+            fn fold_ty(&mut self, t: Ty<'tcx>) -> Ty<'tcx> {
+                if let ty::AssocTy(data) = t.kind {
+                    let substs = data.substs.fold_with(self);
+                    self.tcx.mk_projection(data.item_def_id, substs)
+                } else if t.has_ty_assoc() {
+                    t.super_fold_with(self)
+                } else {
+                    t
+                }
+            }
+        }
+
+        t.fold_with(&mut ProjectionReseter { tcx: self })
     }
 }
 
@@ -741,7 +767,7 @@ impl<'tcx> ty::TyS<'tcx> {
             | ty::Param(_)
             | ty::Placeholder(_)
             | ty::Projection(_)
-            | ty::UnnormalizedProjection(_) => false,
+            | ty::AssocTy(_) => false,
         }
     }
 
@@ -819,12 +845,7 @@ impl<'tcx> ty::TyS<'tcx> {
             //
             // FIXME(ecstaticmorse): Maybe we should `bug` here? This should probably only be
             // called for known, fully-monomorphized types.
-            Projection(_)
-            | UnnormalizedProjection(_)
-            | Opaque(..)
-            | Param(_)
-            | Bound(..)
-            | Placeholder(_)
+            Projection(_) | AssocTy(_) | Opaque(..) | Param(_) | Bound(..) | Placeholder(_)
             | Infer(_) => false,
 
             Foreign(_) | GeneratorWitness(..) | Error(_) => false,
@@ -1137,7 +1158,7 @@ pub fn needs_drop_components(
         // These require checking for `Copy` bounds or `Adt` destructors.
         ty::Adt(..)
         | ty::Projection(..)
-        | ty::UnnormalizedProjection(..)
+        | ty::AssocTy(..)
         | ty::Param(_)
         | ty::Bound(..)
         | ty::Placeholder(..)

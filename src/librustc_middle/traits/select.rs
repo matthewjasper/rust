@@ -142,6 +142,10 @@ pub enum SelectionCandidate<'tcx> {
     BuiltinObjectCandidate,
 
     BuiltinUnsizeCandidate,
+
+    /// We've been given a TraitRef where the self type is `ty::Projection`
+    /// ask the caller to normalize it and try again.
+    NormalizeCandidate,
 }
 
 /// The result of trait evaluation. The order is important

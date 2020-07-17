@@ -1,0 +1,9 @@
+error[E0277]: the trait bound `(): Trait2<'_>` is not satisfied
+  --> $DIR/issue-35570.rs:9:54
+   |
+LL |     let _e: (usize, usize) = unsafe { mem::transmute(param) };
+   |                                                      ^^^^^ the trait `Trait2<'_>` is not implemented for `()`
+
+error: aborting due to previous error
+
+For more information about this error, try `rustc --explain E0277`.

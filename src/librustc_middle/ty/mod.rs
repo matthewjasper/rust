@@ -555,7 +555,7 @@ bitflags! {
                                           | TypeFlags::HAS_TY_OPAQUE.bits
                                           | TypeFlags::HAS_CT_PROJECTION.bits;
 
-        const HAS_TY_UNNORMALIZED_PROJECTION = 1 << 13;
+        const HAS_TY_ASSOC = 1 << 13;
 
         /// Is an error type/const reachable?
         const HAS_ERROR                   = 1 << 14;

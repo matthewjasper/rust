@@ -416,7 +416,7 @@ impl<'cx, 'tcx> TypeFolder<'tcx> for Canonicalizer<'cx, 'tcx> {
             | ty::Tuple(..)
             | ty::Projection(..)
             // TODO: Should this revert to `Projection` when canonicalized?
-            | ty::UnnormalizedProjection(..)
+            | ty::AssocTy(..)
             | ty::Foreign(..)
             | ty::Param(..)
             | ty::Opaque(..) => {
@@ -641,7 +641,7 @@ impl<'cx, 'tcx> Canonicalizer<'cx, 'tcx> {
         if bound_to != ty_var {
             self.fold_ty(bound_to)
         } else {
-            let var = self.canonical_var(info, ty_var.into());
+            let var = self.canonical_var(info, infcx.root_var_ty(ty_var).into());
             self.tcx().mk_ty(ty::Bound(self.binder_index, var.into()))
         }
     }
@@ -660,7 +660,7 @@ impl<'cx, 'tcx> Canonicalizer<'cx, 'tcx> {
         if bound_to != const_var {
             self.fold_const(bound_to)
         } else {
-            let var = self.canonical_var(info, const_var.into());
+            let var = self.canonical_var(info, infcx.root_var_const(const_var).into());
             self.tcx().mk_const(ty::Const {
                 val: ty::ConstKind::Bound(self.binder_index, var),
                 ty: self.fold_ty(const_var.ty),

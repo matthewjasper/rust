@@ -1,15 +1,13 @@
-error[E0326]: implemented const `FROM` has an incompatible type for trait
-  --> $DIR/associated-const-generic-obligations.rs:14:17
+error[E0271]: type mismatch resolving `<T as Foo>::Out == &str`
+  --> $DIR/associated-const-generic-obligations.rs:14:5
    |
-LL |     const FROM: Self::Out;
-   |                 --------- type in trait
-...
 LL |     const FROM: &'static str = "foo";
-   |                 ^^^^^^^^^^^^ expected associated type, found `&str`
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected associated type, found `&str`
    |
    = note: expected associated type `<T as Foo>::Out`
-                    found reference `&'static str`
+                    found reference `&str`
+   = note: the requirement `<T as Foo>::Out == &str` appears on the associated impl constant but not on the corresponding associated trait constant
 
 error: aborting due to previous error
 
-For more information about this error, try `rustc --explain E0326`.
+For more information about this error, try `rustc --explain E0271`.

@@ -6,8 +6,8 @@ LL | impl<'a, T> Fn<(&'a T,)> for Foo {
 LL |   extern "rust-call" fn call(&self, (_,): (T,)) {}
    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `&T`, found type parameter `T`
    |
-   = note: expected fn pointer `extern "rust-call" fn(&Foo, (&'a T,))`
-              found fn pointer `extern "rust-call" fn(&Foo, (T,))`
+   = note: expected fn pointer `extern "rust-call" for<'r> fn(&'r Foo, (&'a T,)) -> <Foo as std::ops::FnOnce<(&'a T,)>>::Output`
+              found fn pointer `extern "rust-call" for<'r> fn(&'r Foo, (T,))`
 
 error[E0053]: method `call_mut` has an incompatible type for trait
   --> $DIR/issue-20225.rs:11:3
@@ -17,8 +17,8 @@ LL | impl<'a, T> FnMut<(&'a T,)> for Foo {
 LL |   extern "rust-call" fn call_mut(&mut self, (_,): (T,)) {}
    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `&T`, found type parameter `T`
    |
-   = note: expected fn pointer `extern "rust-call" fn(&mut Foo, (&'a T,))`
-              found fn pointer `extern "rust-call" fn(&mut Foo, (T,))`
+   = note: expected fn pointer `extern "rust-call" for<'r> fn(&'r mut Foo, (&'a T,)) -> <Foo as std::ops::FnOnce<(&'a T,)>>::Output`
+              found fn pointer `extern "rust-call" for<'r> fn(&'r mut Foo, (T,))`
 
 error[E0053]: method `call_once` has an incompatible type for trait
   --> $DIR/issue-20225.rs:18:3
@@ -29,7 +29,7 @@ LL | impl<'a, T> FnOnce<(&'a T,)> for Foo {
 LL |   extern "rust-call" fn call_once(self, (_,): (T,)) {}
    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `&T`, found type parameter `T`
    |
-   = note: expected fn pointer `extern "rust-call" fn(Foo, (&'a T,))`
+   = note: expected fn pointer `extern "rust-call" fn(Foo, (&'a T,)) -> <Foo as std::ops::FnOnce<(&'a T,)>>::Output`
               found fn pointer `extern "rust-call" fn(Foo, (T,))`
 
 error: aborting due to 3 previous errors

@@ -62,6 +62,7 @@ impl<'tcx> TypeVisitor<'tcx> for ParameterCollector {
                 // projections are not injective
                 return false;
             }
+            ty::AssocTy(..) => bug!("shouldn't have normalized yet"),
             ty::Param(data) => {
                 self.parameters.push(Parameter::from(data));
             }

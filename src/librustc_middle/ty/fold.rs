@@ -80,8 +80,8 @@ pub trait TypeFoldable<'tcx>: fmt::Debug + Clone {
     fn has_projections(&self) -> bool {
         self.has_type_flags(TypeFlags::HAS_PROJECTION)
     }
-    fn has_unnormalized_projections(&self) -> bool {
-        self.has_type_flags(TypeFlags::HAS_TY_UNNORMALIZED_PROJECTION)
+    fn has_ty_assoc(&self) -> bool {
+        self.has_type_flags(TypeFlags::HAS_TY_ASSOC)
     }
     fn has_opaque_types(&self) -> bool {
         self.has_type_flags(TypeFlags::HAS_TY_OPAQUE)

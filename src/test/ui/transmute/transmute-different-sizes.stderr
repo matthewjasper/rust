@@ -23,7 +23,7 @@ LL |     transmute(x)
    |     ^^^^^^^^^
    |
    = note: source type: `u16` (N bits)
-   = note: target type: `<T as Specializable>::Output` (this type does not have a fixed size)
+   = note: target type: `<T as Specializable>::Output` (size can vary because of <T as Specializable>::Output)
 
 error: aborting due to 3 previous errors
 

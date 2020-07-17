@@ -121,7 +121,7 @@ fn compute_components(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>, out: &mut SmallVec<[Compo
             // trait-ref. Therefore, if we see any higher-ranke regions,
             // we simply fallback to the most restrictive rule, which
             // requires that `Pi: 'a` for all `i`.
-            ty::Projection(ref data) | ty::UnnormalizedProjection(ref data) => {
+            ty::Projection(ref data) | ty::AssocTy(ref data) => {
                 if !data.has_escaping_bound_vars() {
                     // best case: no escaping regions, so push the
                     // projection and skip the subtree (thus generating no

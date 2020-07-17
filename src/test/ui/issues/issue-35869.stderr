@@ -35,13 +35,13 @@ LL |     fn baz(_: (u16, u16)) {}
               found fn pointer `fn((u16, _))`
 
 error[E0053]: method `qux` has an incompatible type for trait
-  --> $DIR/issue-35869.rs:17:17
+  --> $DIR/issue-35869.rs:17:5
    |
 LL |     fn qux() -> u8;
-   |                 -- type in trait
+   |     --------------- type in trait
 ...
 LL |     fn qux() -> u16 { 5u16 }
-   |                 ^^^ expected `u8`, found `u16`
+   |     ^^^^^^^^^^^^^^^ expected `u8`, found `u16`
    |
    = note: expected fn pointer `fn() -> u8`
               found fn pointer `fn() -> u16`

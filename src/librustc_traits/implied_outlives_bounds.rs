@@ -5,7 +5,7 @@
 use rustc_hir as hir;
 use rustc_infer::infer::canonical::{self, Canonical};
 use rustc_infer::infer::{InferCtxt, TyCtxtInferExt};
-use rustc_infer::traits::TraitEngineExt as _;
+use rustc_infer::traits::{ObligationCause, TraitEngineExt as _};
 use rustc_middle::ty::outlives::Component;
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::{self, Ty, TyCtxt, TypeFoldable};
@@ -13,9 +13,9 @@ use rustc_span::source_map::DUMMY_SP;
 use rustc_trait_selection::infer::InferCtxtBuilderExt;
 use rustc_trait_selection::traits::query::outlives_bounds::OutlivesBound;
 use rustc_trait_selection::traits::query::{CanonicalTyGoal, Fallible, NoSolution};
-use rustc_trait_selection::traits::wf;
-use rustc_trait_selection::traits::FulfillmentContext;
 use rustc_trait_selection::traits::TraitEngine;
+use rustc_trait_selection::traits::{self, wf};
+use rustc_trait_selection::traits::{FulfillmentContext, SelectionContext};
 use smallvec::{smallvec, SmallVec};
 
 crate fn provide(p: &mut Providers<'_>) {
@@ -51,6 +51,7 @@ fn compute_implied_outlives_bounds<'tcx>(
 
     let mut implied_bounds = vec![];
 
+    let mut selcx = SelectionContext::new(infcx);
     let mut fulfill_cx = FulfillmentContext::new();
 
     while let Some(arg) = wf_args.pop() {
@@ -118,6 +119,18 @@ fn compute_implied_outlives_bounds<'tcx>(
                 ty::PredicateKind::TypeOutlives(ref data) => match data.no_bound_vars() {
                     None => vec![],
                     Some(ty::OutlivesPredicate(ty_a, r_b)) => {
+                        let traits::Normalized { value: ty_a, obligations } = traits::normalize(
+                            &mut selcx,
+                            param_env,
+                            ObligationCause::misc(DUMMY_SP, hir::CRATE_HIR_ID),
+                            &ty_a,
+                        );
+                        fulfill_cx.register_predicate_obligations(
+                            infcx,
+                            obligations
+                                .into_iter()
+                                .filter(|o| o.predicate.has_infer_types_or_consts()),
+                        );
                         let ty_a = infcx.resolve_vars_if_possible(&ty_a);
                         let mut components = smallvec![];
                         tcx.push_outlives_components(ty_a, &mut components);

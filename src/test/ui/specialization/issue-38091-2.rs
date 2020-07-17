@@ -5,13 +5,17 @@ trait Iterate<'a> {
     type Ty: Valid;
     fn iterate(self);
 }
-impl<'a, T> Iterate<'a> for T where T: Check {
+impl<'a, T> Iterate<'a> for T
+where
+    T: Check,
+{
     default type Ty = ();
     default fn iterate(self) {}
 }
 
 trait Check {}
 impl<'a, T> Check for T where <T as Iterate<'a>>::Ty: Valid {}
+//~^ ERROR overflow evaluating the requirement `T: Check`
 
 trait Valid {}
 
@@ -19,5 +23,4 @@ impl Valid for () {}
 
 fn main() {
     Iterate::iterate(0);
-    //~^ ERROR overflow evaluating the requirement `{integer}: Check`
 }

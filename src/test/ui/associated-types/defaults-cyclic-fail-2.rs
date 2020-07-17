@@ -27,7 +27,6 @@ impl Tr for bool {
     type A = Box<Self::B>;
     //~^ ERROR overflow evaluating the requirement
 }
-// (the error is shown twice for some reason)
 
 impl Tr for usize {
     type B = &'static Self::A;

@@ -161,7 +161,7 @@ where
                     }
                 }
             }
-            ty::Projection(proj) | ty::UnnormalizedProjection(proj) => {
+            ty::Projection(proj) | ty::AssocTy(proj) => {
                 if self.def_id_visitor.skip_assoc_tys() {
                     // Visitors searching for minimal visibility/reachability want to
                     // conservatively approximate associated types like `<Type as Trait>::Alias`

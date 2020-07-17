@@ -7,17 +7,16 @@ use self::SelectionCandidate::*;
 
 use super::coherence::{self, Conflict};
 use super::project;
-use super::project::normalize_with_depth_to;
 use super::util;
 use super::util::{closure_trait_ref_and_return_type, predicate_for_trait_def};
 use super::wf;
 use super::DerivedObligationCause;
 use super::Obligation;
 use super::ObligationCauseCode;
+use super::ProjectionCacheKey;
 use super::Selection;
 use super::SelectionResult;
 use super::TraitQueryMode;
-use super::{Normalized, ProjectionCacheKey};
 use super::{ObligationCause, PredicateObligation, TraitObligation};
 use super::{Overflow, SelectionError, Unimplemented};
 
@@ -26,7 +25,8 @@ use crate::traits::error_reporting::InferCtxtExt;
 use crate::traits::project::ProjectionCacheKeyExt;
 use rustc_ast::attr;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
-use rustc_data_structures::stack::ensure_sufficient_stack;
+// TODO: Work out where this is now needed.
+// use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_errors::ErrorReported;
 use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
@@ -418,10 +418,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 match self.infcx.subtype_predicate(&obligation.cause, obligation.param_env, p) {
                     Some(Ok(InferOk { mut obligations, .. })) => {
                         self.add_depth(obligations.iter_mut(), obligation.recursion_depth);
-                        self.evaluate_predicates_recursively(
-                            previous_stack,
-                            obligations.into_iter(),
-                        )
+                        self.evaluate_predicates_recursively(previous_stack, obligations)
                     }
                     Some(Err(_)) => Ok(EvaluatedToErr),
                     None => Ok(EvaluatedToAmbig),
@@ -458,12 +455,10 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             &ty::PredicateKind::Projection(data) => {
                 let project_obligation = obligation.with(data);
                 match project::poly_project_and_unify_type(self, &project_obligation) {
-                    Ok(Some(mut subobligations)) => {
+                    Ok(Ok(Some(mut subobligations))) => {
                         self.add_depth(subobligations.iter_mut(), obligation.recursion_depth);
-                        let result = self.evaluate_predicates_recursively(
-                            previous_stack,
-                            subobligations.into_iter(),
-                        );
+                        let result =
+                            self.evaluate_predicates_recursively(previous_stack, subobligations);
                         if let Some(key) =
                             ProjectionCacheKey::from_poly_projection_predicate(self, data)
                         {
@@ -471,7 +466,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                         }
                         result
                     }
-                    Ok(None) => Ok(EvaluatedToAmbig),
+                    Ok(Ok(None)) => Ok(EvaluatedToAmbig),
+                    Ok(Err(project::RecursiveProjection)) => Ok(EvaluatedToRecur),
                     Err(_) => Ok(EvaluatedToErr),
                 }
             }
@@ -523,12 +519,12 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 };
 
                 match (evaluate(c1), evaluate(c2)) {
-                    (Ok(c1), Ok(c2)) => {
-                        match self.infcx().at(&obligation.cause, obligation.param_env).eq(c1, c2) {
-                            Ok(_) => Ok(EvaluatedToOk),
-                            Err(_) => Ok(EvaluatedToErr),
+                    (Ok(c1), Ok(c2)) => match self.infcx().at_obligation(&obligation).eq(c1, c2) {
+                        Ok(InferOk { value: (), obligations }) => {
+                            self.evaluate_predicates_recursively(previous_stack, obligations)
                         }
-                    }
+                        Err(_) => Ok(EvaluatedToErr),
+                    },
                     (Err(ErrorHandled::Reported(ErrorReported)), _)
                     | (_, Err(ErrorHandled::Reported(ErrorReported))) => Ok(EvaluatedToErr),
                     (Err(ErrorHandled::Linted), _) | (_, Err(ErrorHandled::Linted)) => span_bug!(
@@ -546,20 +542,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     fn evaluate_trait_predicate_recursively<'o>(
         &mut self,
         previous_stack: TraitObligationStackList<'o, 'tcx>,
-        mut obligation: TraitObligation<'tcx>,
+        obligation: TraitObligation<'tcx>,
     ) -> Result<EvaluationResult, OverflowError> {
         debug!("evaluate_trait_predicate_recursively({:?})", obligation);
-
-        if !self.intercrate
-            && obligation.is_global()
-            && obligation.param_env.caller_bounds.iter().all(|bound| bound.needs_subst())
-        {
-            // If a param env has no global bounds, global obligations do not
-            // depend on its particular value in order to work, so we can clear
-            // out the param env and get better caching.
-            debug!("evaluate_trait_predicate_recursively({:?}) - in global", obligation);
-            obligation.param_env = obligation.param_env.without_caller_bounds();
-        }
 
         let stack = self.push_stack(previous_stack, &obligation);
         let fresh_trait_ref = stack.fresh_trait_ref;
@@ -1285,9 +1270,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
         let tcx = self.infcx.tcx;
         let (def_id, substs) = match placeholder_trait_predicate.trait_ref.self_ty().kind {
-            ty::Projection(ref data) | ty::UnnormalizedProjection(ref data) => {
-                (data.item_def_id, data.substs)
-            }
+            ty::Projection(ref data) | ty::AssocTy(ref data) => (data.item_def_id, data.substs),
             ty::Opaque(def_id, substs) => (def_id, substs),
             _ => {
                 span_bug!(
@@ -1329,7 +1312,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     ) -> Result<Vec<PredicateObligation<'tcx>>, ()> {
         debug_assert!(!placeholder_trait_ref.has_escaping_bound_vars());
         self.infcx
-            .at(&obligation.cause, obligation.param_env)
+            .at_obligation(obligation)
             .sup(ty::Binder::dummy(placeholder_trait_ref), trait_bound)
             .map(|InferOk { obligations, .. }| obligations)
             .map_err(|_| ())
@@ -1363,7 +1346,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 where_clause_projection.to_poly_trait_ref(this.infcx.tcx);
             match this
                 .infcx
-                .at(&obligation.cause, obligation.param_env)
+                .at_obligation(obligation)
                 .sup(obligation_poly_trait_ref, where_clause_poly_trait_ref)
             {
                 Ok(InferOk { obligations, value: () }) => {
@@ -1422,6 +1405,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                          when there are other valid candidates"
                     );
                 }
+                NormalizeCandidate => {
+                    bug!("NormalizeCandidate should result in early return");
+                }
                 // (*)
                 BuiltinCandidate { has_nested: false } | DiscriminantKindCandidate => false,
                 ImplCandidate(..)
@@ -1450,6 +1436,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                         "default implementations shouldn't be recorded \
                          when there are other valid candidates"
                     );
+                }
+                NormalizeCandidate => {
+                    bug!("NormalizeCandidate should result in early return");
                 }
                 // (*)
                 BuiltinCandidate { has_nested: false } | DiscriminantKindCandidate => false,
@@ -1599,9 +1588,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 ))
             }
 
-            ty::Projection(_) | ty::UnnormalizedProjection(_) | ty::Param(_) | ty::Opaque(..) => {
-                None
-            }
+            ty::Projection(_) | ty::AssocTy(_) | ty::Param(_) | ty::Opaque(..) => None,
             ty::Infer(ty::TyVar(_)) => Ambiguous,
 
             ty::Placeholder(..)
@@ -1663,11 +1650,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 Where(ty::Binder::bind(substs.as_closure().upvar_tys().collect()))
             }
 
-            ty::Adt(..)
-            | ty::Projection(..)
-            | ty::UnnormalizedProjection(..)
-            | ty::Param(..)
-            | ty::Opaque(..) => {
+            ty::Adt(..) | ty::Projection(..) | ty::AssocTy(..) | ty::Param(..) | ty::Opaque(..) => {
                 // Fallback to whatever user-defined impls exist in this case.
                 None
             }
@@ -1717,7 +1700,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             | ty::Param(..)
             | ty::Foreign(..)
             | ty::Projection(..)
-            | ty::UnnormalizedProjection(..)
+            | ty::AssocTy(..)
             | ty::Bound(..)
             | ty::Infer(ty::TyVar(_) | ty::FreshTy(_) | ty::FreshIntTy(_) | ty::FreshFloatTy(_)) => {
                 bug!("asked to assemble constituent types of unexpected type: {:?}", t);
@@ -1770,50 +1753,22 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         trait_def_id: DefId,
         types: ty::Binder<Vec<Ty<'tcx>>>,
     ) -> Vec<PredicateObligation<'tcx>> {
-        // Because the types were potentially derived from
-        // higher-ranked obligations they may reference late-bound
-        // regions. For example, `for<'a> Foo<&'a i32> : Copy` would
-        // yield a type like `for<'a> &'a i32`. In general, we
-        // maintain the invariant that we never manipulate bound
-        // regions, so we have to process these bound regions somehow.
-        //
-        // The strategy is to:
-        //
-        // 1. Instantiate those regions to placeholder regions (e.g.,
-        //    `for<'a> &'a i32` becomes `&0 i32`.
-        // 2. Produce something like `&'0 i32 : Copy`
-        // 3. Re-bind the regions back to `for<'a> &'a i32 : Copy`
-
         types
             .skip_binder() // binder moved -\
             .iter()
-            .flat_map(|ty| {
+            .map(|ty| {
                 let ty: ty::Binder<Ty<'tcx>> = ty::Binder::bind(ty); // <----/
 
-                self.infcx.commit_unconditionally(|_| {
-                    let placeholder_ty = self.infcx.replace_bound_vars_with_placeholders(&ty);
-                    let Normalized { value: normalized_ty, mut obligations } =
-                        ensure_sufficient_stack(|| {
-                            project::normalize_with_depth(
-                                self,
-                                param_env,
-                                cause.clone(),
-                                recursion_depth,
-                                &placeholder_ty,
-                            )
-                        });
-                    let placeholder_obligation = predicate_for_trait_def(
-                        self.tcx(),
-                        param_env,
-                        cause.clone(),
-                        trait_def_id,
-                        recursion_depth,
-                        normalized_ty,
-                        &[],
-                    );
-                    obligations.push(placeholder_obligation);
-                    obligations
-                })
+                let placeholder_ty = self.infcx.replace_bound_vars_with_placeholders(&ty);
+                predicate_for_trait_def(
+                    self.tcx(),
+                    param_env,
+                    cause.clone(),
+                    trait_def_id,
+                    recursion_depth,
+                    placeholder_ty,
+                    &[],
+                )
             })
             .collect()
     }
@@ -1875,7 +1830,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
         let InferOk { obligations, .. } = self
             .infcx
-            .at(&obligation.cause, obligation.param_env)
+            .at_obligation(obligation)
             .eq(placeholder_obligation_trait_ref, impl_trait_ref)
             .map_err(|e| debug!("match_impl: failed eq_trait_refs due to `{}`", e))?;
 
@@ -1954,7 +1909,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         );
 
         self.infcx
-            .at(&obligation.cause, obligation.param_env)
+            .at_obligation(obligation)
             .sup(obligation.predicate.to_poly_trait_ref(), poly_trait_ref)
             .map(|InferOk { obligations, .. }| obligations)
             .map_err(|_| ())
@@ -2073,19 +2028,11 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         assert_eq!(predicates.parent, None);
         let mut obligations = Vec::with_capacity(predicates.predicates.len());
         for (predicate, _) in predicates.predicates {
-            let predicate = normalize_with_depth_to(
-                self,
-                param_env,
-                cause.clone(),
-                recursion_depth,
-                &predicate.subst(tcx, substs),
-                &mut obligations,
-            );
             obligations.push(Obligation {
                 cause: cause.clone(),
                 recursion_depth,
                 param_env,
-                predicate,
+                predicate: predicate.subst(tcx, substs),
             });
         }
 

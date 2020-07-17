@@ -571,6 +571,10 @@ impl<'tcx> RegionConstraintCollector<'_, 'tcx> {
             sub, sup, origin
         );
 
+        if sub == sup {
+            return;
+        }
+
         match (sub, sup) {
             (&ReLateBound(..), _) | (_, &ReLateBound(..)) => {
                 span_bug!(origin.span(), "cannot relate bound region: {:?} <= {:?}", sub, sup);

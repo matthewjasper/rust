@@ -4,7 +4,7 @@ use crate::traits::{self, TraitEngine, TraitEngineExt};
 use rustc_hir as hir;
 use rustc_hir::lang_items;
 use rustc_infer::infer::outlives::env::OutlivesEnvironment;
-use rustc_infer::traits::ObligationCause;
+use rustc_infer::traits::{ObligationCause, TraitEngineExt as _};
 use rustc_middle::arena::ArenaAllocatable;
 use rustc_middle::infer::canonical::{Canonical, CanonicalizedQueryResponse, QueryResponse};
 use rustc_middle::traits::query::Fallible;
@@ -32,6 +32,14 @@ pub trait InferCtxtExt<'tcx> {
     ) -> InferOk<'tcx, T>
     where
         T: TypeFoldable<'tcx>;
+
+    fn can_sub<T>(&self, param_env: ty::ParamEnv<'tcx>, a: T, b: T) -> bool
+    where
+        T: at::ToTrace<'tcx>;
+
+    fn can_eq<T>(&self, param_env: ty::ParamEnv<'tcx>, a: T, b: T) -> bool
+    where
+        T: at::ToTrace<'tcx>;
 }
 
 impl<'cx, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'cx, 'tcx> {
@@ -78,6 +86,44 @@ impl<'cx, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'cx, 'tcx> {
             value, obligations
         );
         InferOk { value, obligations }
+    }
+
+    fn can_sub<T>(&self, param_env: ty::ParamEnv<'tcx>, a: T, b: T) -> bool
+    where
+        T: at::ToTrace<'tcx>,
+    {
+        let origin = &ObligationCause::dummy();
+        self.probe(|_| {
+            self.at(origin, param_env).sub(a, b).map_or(false, |InferOk { obligations, .. }| {
+                if !obligations.is_empty() {
+                    let mut fulfillcx = traits::FulfillmentContext::new_in_snapshot();
+
+                    fulfillcx.register_predicate_obligations(self, obligations);
+                    fulfillcx.select_where_possible(self).is_ok()
+                } else {
+                    true
+                }
+            })
+        })
+    }
+
+    fn can_eq<T>(&self, param_env: ty::ParamEnv<'tcx>, a: T, b: T) -> bool
+    where
+        T: at::ToTrace<'tcx>,
+    {
+        let origin = &ObligationCause::dummy();
+        self.probe(|_| {
+            self.at(origin, param_env).eq(a, b).map_or(false, |InferOk { obligations, .. }| {
+                if !obligations.is_empty() {
+                    let mut fulfillcx = traits::FulfillmentContext::new_in_snapshot();
+
+                    fulfillcx.register_predicate_obligations(self, obligations);
+                    fulfillcx.select_where_possible(self).is_ok()
+                } else {
+                    true
+                }
+            })
+        })
     }
 }
 

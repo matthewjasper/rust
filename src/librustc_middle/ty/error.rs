@@ -274,7 +274,7 @@ impl<'tcx> ty::TyS<'tcx> {
             ty::Infer(ty::FreshTy(_)) => "fresh type".into(),
             ty::Infer(ty::FreshIntTy(_)) => "fresh integral type".into(),
             ty::Infer(ty::FreshFloatTy(_)) => "fresh floating-point type".into(),
-            ty::Projection(_) | ty::UnnormalizedProjection(_) => "associated type".into(),
+            ty::Projection(_) | ty::AssocTy(_) => "associated type".into(),
             ty::Param(p) => format!("type parameter `{}`", p).into(),
             ty::Opaque(..) => "opaque type".into(),
             ty::Error(_) => "type error".into(),
@@ -312,7 +312,7 @@ impl<'tcx> ty::TyS<'tcx> {
             ty::Tuple(..) => "tuple".into(),
             ty::Placeholder(..) => "higher-ranked type".into(),
             ty::Bound(..) => "bound type variable".into(),
-            ty::Projection(_) | ty::UnnormalizedProjection(_) => "associated type".into(),
+            ty::Projection(_) | ty::AssocTy(_) => "associated type".into(),
             ty::Param(_) => "type parameter".into(),
             ty::Opaque(..) => "opaque type".into(),
         }
@@ -388,10 +388,10 @@ impl<'tcx> TyCtxt<'tcx> {
                                  #traits-as-parameters",
                         );
                     }
-                    (ty::Projection(_), ty::Projection(_)) => {
+                    (ty::AssocTy(_), ty::AssocTy(_)) => {
                         db.note("an associated type was expected, but a different one was found");
                     }
-                    (ty::Param(p), ty::Projection(proj)) | (ty::Projection(proj), ty::Param(p)) => {
+                    (ty::Param(p), ty::AssocTy(proj)) | (ty::AssocTy(proj), ty::Param(p)) => {
                         let generics = self.generics_of(body_owner_def_id);
                         let p_span = self.def_span(generics.type_param(p, self).def_id);
                         if !sp.contains(p_span) {
@@ -480,7 +480,7 @@ impl<T> Trait<T> for X {
                             db.span_label(p_span, "this type parameter");
                         }
                     }
-                    (ty::Projection(proj_ty), _) => {
+                    (ty::AssocTy(proj_ty), _) => {
                         self.expected_projection(
                             db,
                             proj_ty,
@@ -489,7 +489,7 @@ impl<T> Trait<T> for X {
                             &cause.code,
                         );
                     }
-                    (_, ty::Projection(proj_ty)) => {
+                    (_, ty::AssocTy(proj_ty)) => {
                         let msg = format!(
                             "consider constraining the associated type `{}` to `{}`",
                             values.found, values.expected,
