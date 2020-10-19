@@ -281,11 +281,20 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
             where_clauses,
         };
 
+        let associated_ty_value_ids: Vec<_> = self
+            .interner
+            .tcx
+            .associated_items(def_id)
+            .in_definition_order()
+            .filter(|i| i.kind == AssocKind::Type)
+            .map(|i| chalk_solve::rust_ir::AssociatedTyValueId(i.def_id))
+            .collect();
+
         Arc::new(chalk_solve::rust_ir::ImplDatum {
             polarity: chalk_solve::rust_ir::Polarity::Positive,
             binders: chalk_ir::Binders::new(binders, value),
             impl_type: chalk_solve::rust_ir::ImplType::Local,
-            associated_ty_value_ids: vec![],
+            associated_ty_value_ids,
         })
     }
 
@@ -404,24 +413,38 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
     ) -> Arc<chalk_solve::rust_ir::AssociatedTyValue<RustInterner<'tcx>>> {
         let def_id = associated_ty_id.0;
         let assoc_item = self.interner.tcx.associated_item(def_id);
-        let impl_id = match assoc_item.container {
-            AssocItemContainer::TraitContainer(def_id) => def_id,
-            _ => unimplemented!("Not possible??"),
+        let (impl_id, trait_id) = match assoc_item.container {
+            AssocItemContainer::TraitContainer(def_id) => (def_id, def_id),
+            AssocItemContainer::ImplContainer(def_id) => {
+                (def_id, self.interner.tcx.impl_trait_ref(def_id).unwrap().def_id)
+            }
         };
         match assoc_item.kind {
             AssocKind::Type => {}
             _ => unimplemented!("Not possible??"),
         }
+
+        let trait_item = self
+            .interner
+            .tcx
+            .associated_items(trait_id)
+            .find_by_name_and_kind(self.interner.tcx, assoc_item.ident, assoc_item.kind, trait_id)
+            .unwrap();
         let bound_vars = bound_vars_for_item(self.interner.tcx, def_id);
         let binders = binders_for(&self.interner, bound_vars);
-        let ty = self.interner.tcx.type_of(def_id);
+        let ty = self
+            .interner
+            .tcx
+            .type_of(def_id)
+            .subst(self.interner.tcx, bound_vars)
+            .lower_into(&self.interner);
 
         Arc::new(chalk_solve::rust_ir::AssociatedTyValue {
             impl_id: chalk_ir::ImplId(impl_id),
-            associated_ty_id: chalk_ir::AssocTypeId(def_id),
+            associated_ty_id: chalk_ir::AssocTypeId(trait_item.def_id),
             value: chalk_ir::Binders::new(
                 binders,
-                chalk_solve::rust_ir::AssociatedTyValueBound { ty: ty.lower_into(&self.interner) },
+                chalk_solve::rust_ir::AssociatedTyValueBound { ty },
             ),
         })
     }
