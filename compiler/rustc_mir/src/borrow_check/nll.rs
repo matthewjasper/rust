@@ -240,6 +240,7 @@ pub(in crate::borrow_check) fn compute_regions<'cx, 'tcx>(
         outlives_constraints,
         member_constraints,
         closure_bounds_mapping,
+        universe_causes,
         type_tests,
     } = constraints;
     let placeholder_indices = Rc::new(placeholder_indices);
@@ -261,6 +262,7 @@ pub(in crate::borrow_check) fn compute_regions<'cx, 'tcx>(
         outlives_constraints,
         member_constraints,
         closure_bounds_mapping,
+        universe_causes,
         type_tests,
         liveness_constraints,
         elements,
