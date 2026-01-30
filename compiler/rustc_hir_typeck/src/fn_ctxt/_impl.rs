@@ -270,6 +270,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         def_id: DefId,
         args: GenericArgsRef<'tcx>,
         user_self_ty: Option<UserSelfTy<'tcx>>,
+        force_type_annotation: bool,
     ) {
         debug!("fcx {}", self.tag());
 
@@ -280,12 +281,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             return;
         }
 
-        if Self::can_contain_user_lifetime_bounds((args, user_self_ty)) {
+        if force_type_annotation || Self::can_contain_user_lifetime_bounds((args, user_self_ty)) {
             let canonicalized = self.canonicalize_user_type_annotation(ty::UserType::new(
                 ty::UserTypeKind::TypeOf(def_id, UserArgs { args, user_self_ty }),
             ));
             debug!(?canonicalized);
-            self.write_user_type_annotation(hir_id, canonicalized);
+            self.write_user_type_annotation(hir_id, canonicalized, force_type_annotation);
         }
     }
 
@@ -294,11 +295,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         &self,
         hir_id: HirId,
         canonical_user_type_annotation: CanonicalUserType<'tcx>,
+        force_type_annotation: bool,
     ) {
         debug!("fcx {}", self.tag());
 
         // FIXME: is_identity being on `UserType` and not `Canonical<UserType>` is awkward
-        if !canonical_user_type_annotation.is_identity() {
+        if force_type_annotation || !canonical_user_type_annotation.is_identity() {
             self.typeck_results
                 .borrow_mut()
                 .user_provided_types_mut()
@@ -965,6 +967,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         span: Span,
         path_span: Span,
         hir_id: HirId,
+        force_annotation: bool,
     ) -> (Ty<'tcx>, Res) {
         let tcx = self.tcx;
 
@@ -1356,7 +1359,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         };
 
         // First, store the "user args" for later.
-        self.write_user_type_annotation_from_args(hir_id, def_id, args_for_user_type, user_self_ty);
+        self.write_user_type_annotation_from_args(
+            hir_id,
+            def_id,
+            args_for_user_type,
+            user_self_ty,
+            force_annotation,
+        );
 
         // Normalize only after registering type annotations.
         let args = self.normalize(span, Unnormalized::new_wip(args_raw));

@@ -530,7 +530,11 @@ impl<'a, 'tcx> ConfirmContext<'a, 'tcx> {
             debug!("instantiate_method_args: user_type_annotation={:?}", user_type_annotation);
 
             if !self.skip_record_for_diagnostics {
-                self.fcx.write_user_type_annotation(self.call_expr.hir_id, user_type_annotation);
+                self.fcx.write_user_type_annotation(
+                    self.call_expr.hir_id,
+                    user_type_annotation,
+                    false,
+                );
             }
         }
 

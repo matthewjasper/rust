@@ -930,7 +930,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             rustc_hir::PatExprKind::Path(qpath) => {
                 let (res, opt_ty, segments) =
                     self.resolve_ty_and_res_fully_qualified_call(qpath, lt.hir_id, lt.span);
-                self.instantiate_value_path(segments, opt_ty, res, lt.span, lt.span, lt.hir_id).0
+                self.instantiate_value_path(
+                    segments, opt_ty, res, lt.span, lt.span, lt.hir_id, false,
+                )
+                .0
             }
         };
         self.write_ty(lt.hir_id, ty);
@@ -1541,7 +1544,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         let (res, opt_ty, segments) =
             self.resolve_ty_and_res_fully_qualified_call(qpath, path_id, span);
-        match res {
+        let force_annotation = match res {
             Res::Err => {
                 let e =
                     self.dcx().span_delayed_bug(qpath.span(), "`Res::Err` but no error emitted");
@@ -1559,6 +1562,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     && let Some((CtorKind::Const, _)) = adt_def.non_enum_variant().ctor
                 {
                     // Ok, we allow unit struct ctors in patterns only.
+                    false
                 } else {
                     let e = report_unexpected_variant_res(
                         tcx,
@@ -1572,19 +1576,22 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     return Err(e);
                 }
             }
-            Res::Def(
-                DefKind::Ctor(_, CtorKind::Const)
-                | DefKind::Const { .. }
-                | DefKind::AssocConst { .. }
-                | DefKind::ConstParam,
-                _,
-            ) => {} // OK
+            // OK
+            Res::Def(DefKind::Ctor(_, CtorKind::Const) | DefKind::ConstParam, _) => false,
+            Res::Def(DefKind::Const | DefKind::AssocConst, _) => true,
             _ => bug!("unexpected pattern resolution: {:?}", res),
-        }
+        };
 
         // Find the type of the path pattern, for later checking.
-        let (pat_ty, pat_res) =
-            self.instantiate_value_path(segments, opt_ty, res, span, span, path_id);
+        let (pat_ty, pat_res) = self.instantiate_value_path(
+            segments,
+            opt_ty,
+            res,
+            span,
+            span,
+            path_id,
+            force_annotation,
+        );
         Ok(ResolvedPat { ty: pat_ty, kind: ResolvedPatKind::Path { res, pat_res, segments } })
     }
 
@@ -1740,8 +1747,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
 
         // Type-check the path.
-        let (pat_ty, res) =
-            self.instantiate_value_path(segments, opt_ty, res, pat.span, pat.span, pat.hir_id);
+        let (pat_ty, res) = self
+            .instantiate_value_path(segments, opt_ty, res, pat.span, pat.span, pat.hir_id, false);
         if !pat_ty.is_fn() {
             return report_unexpected_res(res);
         }

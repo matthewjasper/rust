@@ -47,7 +47,29 @@ Thir {
                         expanded_const: Some(
                             DefId(0:4 ~ str_patterns[fc71]::CONSTANT),
                         ),
-                        ascriptions: [],
+                        ascriptions: [
+                            Ascription {
+                                annotation: CanonicalUserTypeAnnotation {
+                                    user_ty: Canonical {
+                                        value: UserType {
+                                            kind: TypeOf(
+                                                DefId(0:4 ~ str_patterns[fc71]::CONSTANT),
+                                                UserArgs {
+                                                    args: [],
+                                                    user_self_ty: None,
+                                                },
+                                            ),
+                                            bounds: [],
+                                        },
+                                        max_universe: U0,
+                                        var_kinds: [],
+                                    },
+                                    span: $DIR/str-patterns.rs:12:9: 12:17 (#0),
+                                    inferred_ty: &'{erased} str,
+                                },
+                                variance: -,
+                            },
+                        ],
                     },
                 ),
                 kind: Deref {

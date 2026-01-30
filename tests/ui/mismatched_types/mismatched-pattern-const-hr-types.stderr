@@ -1,0 +1,35 @@
+warning: conflicting implementations of trait `Trait` for type `for<'a> fn(Inv<'a>)`
+  --> $DIR/mismatched-pattern-const-hr-types.rs:15:1
+   |
+LL | impl Trait for F1 {
+   | ----------------- first implementation here
+...
+LL | impl Trait for F2 {
+   | ^^^^^^^^^^^^^^^^^ conflicting implementation for `for<'a> fn(Inv<'a>)`
+   |
+   = warning: the behavior may change in a future release
+   = note: for more information, see issue #56105 <https://github.com/rust-lang/rust/issues/56105>
+   = note: this behavior recently changed as a result of a bug fix; see rust-lang/rust#56105 for details
+   = note: `#[warn(coherence_leak_check)]` (part of `#[warn(future_incompatible)]`) on by default
+
+error[E0308]: mismatched types
+  --> $DIR/mismatched-pattern-const-hr-types.rs:29:12
+   |
+LL |     if let A = B {
+   |            ^ one type is more general than the other
+   |
+   = note: expected struct `InvTy<for<'a> fn(Inv<'a>)>`
+              found struct `InvTy<fn(Inv<'_>)>`
+
+error[E0308]: mismatched types
+  --> $DIR/mismatched-pattern-const-hr-types.rs:33:12
+   |
+LL |     if let B = A {
+   |            ^ one type is more general than the other
+   |
+   = note: expected struct `InvTy<fn(Inv<'_>)>`
+              found struct `InvTy<for<'a> fn(Inv<'a>)>`
+
+error: aborting due to 2 previous errors; 1 warning emitted
+
+For more information about this error, try `rustc --explain E0308`.

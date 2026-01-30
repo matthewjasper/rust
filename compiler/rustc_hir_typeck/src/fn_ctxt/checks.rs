@@ -808,7 +808,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             debug!("check_struct_path: did={:?} args={:?}", did, args);
 
             // Register type annotation.
-            self.write_user_type_annotation_from_args(hir_id, did, args, user_self_ty);
+            self.write_user_type_annotation_from_args(
+                hir_id,
+                did,
+                args,
+                user_self_ty,
+                false,
+            );
 
             // Check bounds on type arguments used in the path.
             self.add_required_obligations_for_hir(path_span, did, args, hir_id);
