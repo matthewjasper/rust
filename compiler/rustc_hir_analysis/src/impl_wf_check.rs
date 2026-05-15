@@ -99,12 +99,15 @@ pub(crate) fn enforce_impl_lifetime_params_are_constrained(
         &mut input_parameters,
     );
 
-    // Disallow unconstrained lifetimes, but only if they appear in assoc types.
+    // Disallow unconstrained lifetimes, but only if they appear in assoc types or an
+    // implementation with defaults.
+    let mut has_default = false;
     let lifetimes_in_associated_types: FxHashSet<_> = tcx
         .associated_item_def_ids(impl_def_id)
         .iter()
         .flat_map(|&def_id| {
             let item = tcx.associated_item(def_id);
+            has_default |= item.defaultness(tcx).is_default();
             match item.kind {
                 ty::AssocKind::Type { .. } => {
                     if item.defaultness(tcx).has_value() {
@@ -145,7 +148,7 @@ pub(crate) fn enforce_impl_lifetime_params_are_constrained(
                 // associated types. I believe this is sound, because lifetimes
                 // used elsewhere are not projected back out.
                 let param_lt = cgp::Parameter::from(param.to_early_bound_region_data());
-                if lifetimes_in_associated_types.contains(&param_lt)
+                if (lifetimes_in_associated_types.contains(&param_lt) || has_default)
                     && !input_parameters.contains(&param_lt)
                 {
                     let mut diag = tcx.dcx().create_err(UnconstrainedGenericParameter {
